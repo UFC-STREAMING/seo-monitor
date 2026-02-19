@@ -156,17 +156,19 @@ export async function GET(request: Request) {
         const sitemapUrls = await discoverSitemapUrls(domain);
         if (sitemapUrls.length === 0) continue;
 
-        // Build a lookup: slug → URL
-        const slugToUrl = new Map<string, string>();
-        for (const url of sitemapUrls) {
-          const slug = extractSlugFromUrl(url);
-          if (slug) slugToUrl.set(slug.toLowerCase(), url);
-        }
+        // Build a list of { slug, url } for contains-matching
+        const sitemapEntries = sitemapUrls.map((url) => ({
+          slug: extractSlugFromUrl(url).toLowerCase(),
+          url,
+        })).filter((e) => e.slug);
 
         for (const entry of entries) {
-          // Convert keyword back to slug form for matching
+          // Convert keyword to slug form: "oreiller derila ergo" → "oreiller-derila-ergo"
           const kwSlug = entry.keyword.toLowerCase().replace(/\s+/g, "-");
-          const matchedUrl = slugToUrl.get(kwSlug);
+          // Match any sitemap URL whose slug CONTAINS the keyword slug
+          // e.g. "oreiller-derila-ergo" matches "oreiller-derila-ergo-avis"
+          const matched = sitemapEntries.find((e) => e.slug.includes(kwSlug));
+          const matchedUrl = matched?.url;
 
           if (matchedUrl) {
             sitemapMatched++;
