@@ -142,6 +142,7 @@ export async function GET(request: Request) {
   // Group by domain to fetch each sitemap only once
   const sitemapUrlsToReindex: string[] = [];
   let sitemapMatched = 0;
+  let missingPages = 0;
 
   if (outOf100.length > 0) {
     const byDomain = new Map<string, typeof outOf100>();
@@ -154,7 +155,6 @@ export async function GET(request: Request) {
     for (const [domain, entries] of byDomain) {
       try {
         const sitemapUrls = await discoverSitemapUrls(domain);
-        if (sitemapUrls.length === 0) continue;
 
         // Build a list of { slug, url } for contains-matching
         const sitemapEntries = sitemapUrls.map((url) => ({
@@ -163,10 +163,7 @@ export async function GET(request: Request) {
         })).filter((e) => e.slug);
 
         for (const entry of entries) {
-          // Convert keyword to slug form: "oreiller derila ergo" → "oreiller-derila-ergo"
           const kwSlug = entry.keyword.toLowerCase().replace(/\s+/g, "-");
-          // Match any sitemap URL whose slug CONTAINS the keyword slug
-          // e.g. "oreiller-derila-ergo" matches "oreiller-derila-ergo-avis"
           const matched = sitemapEntries.find((e) => e.slug.includes(kwSlug));
           const matchedUrl = matched?.url;
 
@@ -174,7 +171,6 @@ export async function GET(request: Request) {
             sitemapMatched++;
             sitemapUrlsToReindex.push(matchedUrl);
 
-            // Upsert into site_pages as not_indexed
             await supabase
               .from("site_pages")
               .upsert({
@@ -182,6 +178,19 @@ export async function GET(request: Request) {
                 url: matchedUrl,
                 source: "sitemap",
                 index_status: "not_indexed",
+                last_checked_at: new Date().toISOString(),
+              }, { onConflict: "site_id,url" });
+          } else {
+            // No matching URL in sitemap → missing page
+            missingPages++;
+            const expectedUrl = `https://${domain}/${kwSlug}/`;
+            await supabase
+              .from("site_pages")
+              .upsert({
+                site_id: entry.siteId,
+                url: expectedUrl,
+                source: "missing",
+                index_status: "missing",
                 last_checked_at: new Date().toISOString(),
               }, { onConflict: "site_id,url" });
           }
@@ -267,7 +276,7 @@ export async function GET(request: Request) {
     }
   }
 
-  console.log(`[CRON] Position check complete: ${dedupedArray.length} keywords, ${totalApiCalls} API calls, ${deindexedUrls.length} drops, ${outOf100.length} out-of-100, ${sitemapMatched} sitemap matches`);
+  console.log(`[CRON] Position check complete: ${dedupedArray.length} keywords, ${totalApiCalls} API calls, ${deindexedUrls.length} drops, ${outOf100.length} out-of-100, ${sitemapMatched} matched, ${missingPages} missing`);
 
   return NextResponse.json({
     checked: dedupedArray.length,
@@ -276,6 +285,7 @@ export async function GET(request: Request) {
     deindexed: deindexedUrls.length,
     outOf100: outOf100.length,
     sitemapMatched,
+    missingPages,
     reindexSubmitted: allUrlsToReindex.length,
     apiCalls: totalApiCalls,
     errors: errors.length > 0 ? errors : undefined,

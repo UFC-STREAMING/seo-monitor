@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { FileWarning, RefreshCw, CheckCircle, Search, Globe } from "lucide-react";
+import { FileWarning, RefreshCw, CheckCircle, Search, Globe, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 interface DeindexedRow {
@@ -273,7 +273,17 @@ export default function IndexationPage() {
   const submittedCount = deindexed.filter((d) => d.status === "reindex_submitted").length;
   const reindexedCount = deindexed.filter((d) => d.status === "reindexed").length;
 
-  const filteredPages = pages.filter((p) => {
+  // Separate missing pages from regular pages
+  const missingPages = pages.filter((p) => p.source === "missing");
+  const regularPages = pages.filter((p) => p.source !== "missing");
+
+  const filteredMissing = missingPages.filter((p) => {
+    if (selectedSite !== "all" && !sites.find((s) => s.id === selectedSite && s.domain === p.site_domain))
+      return false;
+    return true;
+  });
+
+  const filteredPages = regularPages.filter((p) => {
     if (selectedSite !== "all" && !sites.find((s) => s.id === selectedSite && s.domain === p.site_domain))
       return false;
     if (filterStatus !== "all" && p.index_status !== filterStatus) return false;
@@ -411,6 +421,58 @@ export default function IndexationPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Missing Pages Section */}
+      {filteredMissing.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              Missing Pages ({filteredMissing.length})
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Keywords hors top 100 sans page produit correspondante dans le sitemap. Ces contenus doivent être créés.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Site</TableHead>
+                  <TableHead>Product / Keyword</TableHead>
+                  <TableHead>Expected URL</TableHead>
+                  <TableHead>Detected</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredMissing.map((p) => {
+                  // Extract keyword from the expected URL slug
+                  const slug = p.url.split("/").filter(Boolean).pop() ?? "";
+                  const keyword = slug.replace(/-/g, " ");
+                  return (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-medium">{p.site_domain}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-orange-600 border-orange-300">
+                          {keyword}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {p.url}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {p.last_checked_at
+                          ? new Date(p.last_checked_at).toLocaleDateString()
+                          : "-"}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sitemap Scanner Section */}
       <Card>
