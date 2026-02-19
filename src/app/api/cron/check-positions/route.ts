@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DataForSeoClient } from "@/lib/dataforseo/client";
 import { createIndexerService } from "@/lib/indexer/factory";
+import { discoverSitemapUrls } from "@/lib/sitemap/parser";
+import { extractSlugFromUrl, slugToKeyword } from "@/lib/sitemap/slug";
 
-export const maxDuration = 300; // Allow up to 5 minutes for cron
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
-  // Verify cron secret (Vercel sends this automatically)
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -14,7 +15,6 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Fetch all keywords grouped by unique (keyword, location_code)
   const { data: keywords, error } = await supabase
     .from("keywords")
     .select("id, keyword, location_code, site_id, sites(domain), locations(default_language)");
@@ -59,6 +59,8 @@ export async function GET(request: Request) {
   const dedupedArray = Array.from(deduped.entries());
   let totalApiCalls = 0;
   const deindexedUrls: Array<{ siteId: string; keywordId: string; url: string }> = [];
+  // Collect ALL out-of-100 keywords (not just drops)
+  const outOf100: Array<{ siteId: string; keywordId: string; domain: string; keyword: string }> = [];
   const errors: string[] = [];
 
   for (const [, data] of dedupedArray) {
@@ -110,11 +112,22 @@ export async function GET(request: Request) {
           serp_features: null,
         });
 
+        // Classic drop detection (was in top 100, now gone)
         if (prevPosition !== null && newPosition === null && prevUrl) {
           deindexedUrls.push({
             siteId: entry.siteId,
             keywordId: entry.keywordId,
             url: prevUrl,
+          });
+        }
+
+        // Collect ALL out-of-100 keywords for sitemap matching
+        if (newPosition === null) {
+          outOf100.push({
+            siteId: entry.siteId,
+            keywordId: entry.keywordId,
+            domain: entry.domain,
+            keyword: data.keyword,
           });
         }
       }
@@ -125,7 +138,59 @@ export async function GET(request: Request) {
     }
   }
 
-  // Handle deindexed URLs
+  // ── Sitemap matching for ALL out-of-100 keywords ──
+  // Group by domain to fetch each sitemap only once
+  const sitemapUrlsToReindex: string[] = [];
+  let sitemapMatched = 0;
+
+  if (outOf100.length > 0) {
+    const byDomain = new Map<string, typeof outOf100>();
+    for (const entry of outOf100) {
+      const arr = byDomain.get(entry.domain) ?? [];
+      arr.push(entry);
+      byDomain.set(entry.domain, arr);
+    }
+
+    for (const [domain, entries] of byDomain) {
+      try {
+        const sitemapUrls = await discoverSitemapUrls(domain);
+        if (sitemapUrls.length === 0) continue;
+
+        // Build a lookup: slug → URL
+        const slugToUrl = new Map<string, string>();
+        for (const url of sitemapUrls) {
+          const slug = extractSlugFromUrl(url);
+          if (slug) slugToUrl.set(slug.toLowerCase(), url);
+        }
+
+        for (const entry of entries) {
+          // Convert keyword back to slug form for matching
+          const kwSlug = entry.keyword.toLowerCase().replace(/\s+/g, "-");
+          const matchedUrl = slugToUrl.get(kwSlug);
+
+          if (matchedUrl) {
+            sitemapMatched++;
+            sitemapUrlsToReindex.push(matchedUrl);
+
+            // Upsert into site_pages as not_indexed
+            await supabase
+              .from("site_pages")
+              .upsert({
+                site_id: entry.siteId,
+                url: matchedUrl,
+                source: "sitemap",
+                index_status: "not_indexed",
+                last_checked_at: new Date().toISOString(),
+              }, { onConflict: "site_id,url" });
+          }
+        }
+      } catch (err) {
+        console.error(`[CRON] Sitemap fetch error for ${domain}:`, err);
+      }
+    }
+  }
+
+  // ── Handle classic drops (position X → null) ──
   if (deindexedUrls.length > 0) {
     await supabase.from("deindexed_urls").insert(
       deindexedUrls.map((d) => ({
@@ -144,23 +209,38 @@ export async function GET(request: Request) {
         message: `URL deindexed: ${d.url}`,
       }))
     );
+  }
 
+  // ── Submit ALL not-indexed URLs to Rapid Indexer ──
+  // Combine classic drops + sitemap-matched out-of-100
+  const allUrlsToReindex = [
+    ...new Set([
+      ...deindexedUrls.map((d) => d.url),
+      ...sitemapUrlsToReindex,
+    ]),
+  ];
+
+  if (allUrlsToReindex.length > 0) {
     try {
       const indexer = createIndexerService();
-      const urls = [...new Set(deindexedUrls.map((d) => d.url))];
-      const { taskId } = await indexer.submitUrls(urls);
+      const { taskId } = await indexer.submitUrls(allUrlsToReindex);
 
       await supabase.from("indexer_tasks").insert({
         task_id: taskId,
-        urls,
+        urls: allUrlsToReindex,
         status: "pending",
       });
 
-      await supabase
-        .from("deindexed_urls")
-        .update({ status: "reindex_submitted", indexer_task_id: taskId })
-        .in("url", urls)
-        .eq("status", "detected");
+      // Update deindexed_urls status if any
+      if (deindexedUrls.length > 0) {
+        await supabase
+          .from("deindexed_urls")
+          .update({ status: "reindex_submitted", indexer_task_id: taskId })
+          .in("url", deindexedUrls.map((d) => d.url))
+          .eq("status", "detected");
+      }
+
+      console.log(`[CRON] Auto-submitted ${allUrlsToReindex.length} URLs to Rapid Indexer (task ${taskId})`);
     } catch (err) {
       console.error("[CRON] Rapid Indexer auto-submit error:", err);
     }
@@ -168,7 +248,6 @@ export async function GET(request: Request) {
 
   // Log API usage
   if (totalApiCalls > 0) {
-    // Get user_id from any site (single-user system)
     const { data: anySite } = await supabase
       .from("sites")
       .select("user_id")
@@ -186,13 +265,16 @@ export async function GET(request: Request) {
     }
   }
 
-  console.log(`[CRON] Position check complete: ${dedupedArray.length} keywords, ${totalApiCalls} API calls, ${deindexedUrls.length} deindexed`);
+  console.log(`[CRON] Position check complete: ${dedupedArray.length} keywords, ${totalApiCalls} API calls, ${deindexedUrls.length} drops, ${outOf100.length} out-of-100, ${sitemapMatched} sitemap matches`);
 
   return NextResponse.json({
     checked: dedupedArray.length,
     totalKeywords: keywords.length,
     deduplicated: keywords.length - dedupedArray.length,
     deindexed: deindexedUrls.length,
+    outOf100: outOf100.length,
+    sitemapMatched,
+    reindexSubmitted: allUrlsToReindex.length,
     apiCalls: totalApiCalls,
     errors: errors.length > 0 ? errors : undefined,
   });
