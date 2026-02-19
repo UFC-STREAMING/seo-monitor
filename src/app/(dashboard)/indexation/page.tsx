@@ -69,7 +69,7 @@ export default function IndexationPage() {
   const [scanning, setScanning] = useState(false);
   const [selectedSite, setSelectedSite] = useState<string>("all");
   const [manualUrls, setManualUrls] = useState("");
-  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("not_indexed");
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();

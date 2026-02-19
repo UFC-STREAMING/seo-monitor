@@ -61,22 +61,74 @@ export async function parseSitemap(sitemapUrl: string): Promise<string[]> {
   return urls;
 }
 
+/** Paths that are NOT product pages (WooCommerce / generic site pages) */
+const EXCLUDED_PATHS = [
+  "/panier/", "/cart/", "/checkout/",
+  "/mon-compte/", "/my-account/",
+  "/boutique/", "/shop/",
+  "/contact/", "/a-propos/", "/about/",
+  "/mentions-legales/", "/legal/",
+  "/politique-de-confidentialite/", "/privacy-policy/",
+  "/politique-de-retour/", "/refund-policy/", "/return-policy/",
+  "/conditions-generales", "/terms/",
+  "/livraison/", "/shipping/",
+  "/paiement/", "/payment/",
+  "/notre-equipe/", "/team/",
+  "/programme-affiliation/", "/affiliate/",
+];
+
+/**
+ * Filter out non-product URLs (homepage, legal pages, cart, etc.)
+ * Keeps only URLs with a meaningful slug (product pages).
+ */
+export function filterProductUrls(urls: string[]): string[] {
+  return urls.filter((url) => {
+    try {
+      const { pathname } = new URL(url);
+      // Exclude homepage
+      if (pathname === "/" || pathname === "") return false;
+      // Exclude known non-product paths
+      const pathLower = pathname.toLowerCase();
+      return !EXCLUDED_PATHS.some((exc) => pathLower.includes(exc));
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * Try common sitemap URLs for a domain and return all found page URLs.
+ * Prioritizes product-specific sitemaps (WooCommerce product-sitemap.xml).
+ * Filters out non-product pages by default.
  */
-export async function discoverSitemapUrls(domain: string): Promise<string[]> {
-  const candidates = [
+export async function discoverSitemapUrls(
+  domain: string,
+  { productsOnly = true }: { productsOnly?: boolean } = {},
+): Promise<string[]> {
+  // Try product-specific sitemaps first
+  const productSitemaps = [
+    `https://${domain}/product-sitemap.xml`,
+    `https://${domain}/wp-sitemap-posts-product-1.xml`,
+  ];
+
+  for (const url of productSitemaps) {
+    const urls = await parseSitemap(url);
+    if (urls.length > 0) {
+      return productsOnly ? filterProductUrls(urls) : urls;
+    }
+  }
+
+  // Fallback to general sitemaps
+  const generalSitemaps = [
     `https://${domain}/sitemap.xml`,
     `https://${domain}/sitemap_index.xml`,
     `https://${domain}/wp-sitemap.xml`,
-    `https://${domain}/post-sitemap.xml`,
-    `https://${domain}/product-sitemap.xml`,
   ];
 
-  for (const url of candidates) {
+  for (const url of generalSitemaps) {
     const urls = await parseSitemap(url);
     if (urls.length > 0) {
-      return urls;
+      return productsOnly ? filterProductUrls(urls) : urls;
     }
   }
 
