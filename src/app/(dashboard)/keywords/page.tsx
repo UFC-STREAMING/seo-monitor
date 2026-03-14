@@ -31,7 +31,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ArrowUp, ArrowDown, Minus, RefreshCw, Plus, Trash2 } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, RefreshCw, Plus, Trash2, Sparkles, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import type { Location } from "@/types/database";
 
@@ -64,6 +64,14 @@ export default function KeywordsPage() {
   const [addKeyword, setAddKeyword] = useState("");
   const [addLocationCode, setAddLocationCode] = useState("");
   const [adding, setAdding] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<{
+    brands: string[];
+    toRemove: Array<{ keyword: string; count: number }>;
+    totalEntries: number;
+  } | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -85,12 +93,13 @@ export default function KeywordsPage() {
       return;
     }
 
-    // Fetch latest 2 positions for each keyword
-    const keywordIds = kws.map((k) => k.id);
+    // Fetch latest positions — filter by site_id (few sites) instead of
+    // keyword_id (hundreds of UUIDs that exceed PostgREST URL length limit)
+    const siteIds = [...new Set(kws.map((k) => k.site_id))];
     const { data: positions } = await supabase
       .from("keyword_positions")
       .select("keyword_id, site_id, position, url_found, checked_at")
-      .in("keyword_id", keywordIds)
+      .in("site_id", siteIds)
       .order("checked_at", { ascending: false });
 
     const posMap = new Map<
@@ -137,7 +146,8 @@ export default function KeywordsPage() {
       });
     });
 
-    setGrouped(Array.from(groups.values()));
+    const groupedArray = Array.from(groups.values());
+    setGrouped(groupedArray);
     setLoading(false);
   }, []);
 
@@ -237,6 +247,67 @@ export default function KeywordsPage() {
     }
   }
 
+  async function handleCleanupPreview() {
+    setCleaning(true);
+    try {
+      const res = await fetch("/api/keywords/cleanup");
+      const data = await res.json();
+      if (res.ok) {
+        setCleanupPreview(data);
+        setCleanupOpen(true);
+      } else {
+        toast.error(data.error || "Failed to preview cleanup");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  async function handleCleanupConfirm() {
+    setCleaning(true);
+    try {
+      const res = await fetch("/api/keywords/cleanup", { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || `${data.removed} keywords removed`);
+        setCleanupOpen(false);
+        setCleanupPreview(null);
+        setLoading(true);
+        await fetchData();
+      } else {
+        toast.error(data.error || "Failed to cleanup");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setCleaning(false);
+    }
+  }
+
+  async function handleSyncKeywords() {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/keywords/sync", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || `${data.added} keywords synced`);
+        setLoading(true);
+        await fetchData();
+      } else {
+        toast.error(data.error || "Failed to sync keywords");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  // Only show countries that have tracked keywords
+  const activeCountries = [...new Set(grouped.map((g) => g.countryIso))].filter(Boolean);
+
   const filtered = grouped.filter((g) => {
     if (filterCountry !== "all" && g.countryIso !== filterCountry) return false;
     if (filterNiche !== "all" && g.niche !== filterNiche) return false;
@@ -276,6 +347,24 @@ export default function KeywordsPage() {
           <Button onClick={handleCheckPositions} disabled={checking} variant="outline">
             <RefreshCw className={`mr-2 h-4 w-4 ${checking ? "animate-spin" : ""}`} />
             {checking ? "Checking..." : "Check Positions"}
+          </Button>
+
+          <Button
+            onClick={handleSyncKeywords}
+            disabled={syncing}
+            variant="outline"
+          >
+            <Link2 className={`mr-2 h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing..." : "Sync to Sites"}
+          </Button>
+
+          <Button
+            onClick={handleCleanupPreview}
+            disabled={cleaning}
+            variant="outline"
+          >
+            <Sparkles className={`mr-2 h-4 w-4`} />
+            {cleaning ? "Loading..." : "Cleanup"}
           </Button>
 
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -340,11 +429,13 @@ export default function KeywordsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All countries</SelectItem>
-            {locations.map((loc) => (
-              <SelectItem key={loc.code} value={loc.country_iso}>
-                {loc.country_iso} - {loc.name}
-              </SelectItem>
-            ))}
+            {locations
+              .filter((loc) => activeCountries.includes(loc.country_iso))
+              .map((loc) => (
+                <SelectItem key={loc.code} value={loc.country_iso}>
+                  {loc.country_iso} - {loc.name}
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
 
@@ -379,6 +470,77 @@ export default function KeywordsPage() {
           </Card>
         ))}
       </div>
+
+      {/* Cleanup confirmation dialog */}
+      <Dialog open={cleanupOpen} onOpenChange={setCleanupOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Cleanup Secondary Keywords</DialogTitle>
+            <DialogDescription>
+              Keep only brand names and remove long-tail variants.
+            </DialogDescription>
+          </DialogHeader>
+          {cleanupPreview && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-2">
+                  Brands to keep ({cleanupPreview.brands.length}):
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {cleanupPreview.brands.map((b) => (
+                    <Badge key={b} variant="outline" className="text-green-600">
+                      {b}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              {cleanupPreview.toRemove.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">
+                    Keywords to remove ({cleanupPreview.totalEntries} entries):
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {cleanupPreview.toRemove.map((r) => (
+                      <Badge
+                        key={r.keyword}
+                        variant="destructive"
+                        className="text-xs"
+                      >
+                        {r.keyword} ({r.count})
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {cleanupPreview.toRemove.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No secondary keywords found. Everything is clean!
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCleanupOpen(false)}
+              disabled={cleaning}
+            >
+              Cancel
+            </Button>
+            {cleanupPreview && cleanupPreview.toRemove.length > 0 && (
+              <Button
+                variant="destructive"
+                onClick={handleCleanupConfirm}
+                disabled={cleaning}
+              >
+                {cleaning
+                  ? "Removing..."
+                  : `Remove ${cleanupPreview.totalEntries} entries`}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Keywords table - grouped by keyword */}
       <Card>

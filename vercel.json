@@ -1,12 +1,2 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/check-positions",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/check-indexation",
-      "schedule": "0 7 * * *"
-    }
-  ]
 }

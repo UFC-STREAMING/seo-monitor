@@ -13,6 +13,7 @@ import {
   Network,
   KeyRound,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -21,6 +22,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Keywords", href: "/keywords", icon: Search },
+  { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileWarning },
   { name: "Network", href: "/network", icon: Network },
   { name: "Alerts", href: "/alerts", icon: Bell },

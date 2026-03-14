@@ -230,8 +230,17 @@ export class DataForSeoClient {
     const response = await this.getSerpLive(query, locationCode, languageCode);
 
     const task = response?.tasks?.[0];
-    if (!task || task.status_code !== 20000) {
-      throw new Error(`DataForSEO error: ${task?.status_message || "Unknown"}`);
+    if (!task) {
+      throw new Error("DataForSEO error: no task returned");
+    }
+
+    // "No Search Results" = page not indexed (not an error)
+    if (task.status_code === 40501 || task.status_message === "No Search Results.") {
+      return { indexed: false, matchedUrl: null };
+    }
+
+    if (task.status_code !== 20000) {
+      throw new Error(`DataForSEO error: ${task.status_message || "Unknown"}`);
     }
 
     const items = task.result?.[0]?.items ?? [];

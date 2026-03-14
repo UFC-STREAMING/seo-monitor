@@ -26,7 +26,7 @@ export type IndexerTaskStatus =
   | "completed"
   | "failed";
 
-export type ApiService = "dataforseo" | "rapid_indexer" | "brave";
+export type ApiService = "dataforseo" | "rapid_indexer" | "brave" | "gsc" | "google_indexing";
 
 // ---------------------------------------------------------------------------
 // JSON column types
@@ -523,6 +523,154 @@ export interface Database {
         ];
       };
 
+      gsc_properties: {
+        Row: {
+          id: string;
+          user_id: string;
+          site_url: string;
+          permission_level: string | null;
+          site_id: string | null;
+          is_active: boolean;
+          last_synced_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          site_url: string;
+          permission_level?: string | null;
+          site_id?: string | null;
+          is_active?: boolean;
+          last_synced_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          site_url?: string;
+          permission_level?: string | null;
+          site_id?: string | null;
+          is_active?: boolean;
+          last_synced_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "gsc_properties_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "sites";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+
+      gsc_search_data: {
+        Row: {
+          id: string;
+          gsc_property_id: string;
+          date: string;
+          query: string;
+          page: string | null;
+          country: string;
+          clicks: number;
+          impressions: number;
+          ctr: number;
+          position: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          gsc_property_id: string;
+          date: string;
+          query: string;
+          page?: string | null;
+          country: string;
+          clicks?: number;
+          impressions?: number;
+          ctr?: number;
+          position?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          gsc_property_id?: string;
+          date?: string;
+          query?: string;
+          page?: string | null;
+          country?: string;
+          clicks?: number;
+          impressions?: number;
+          ctr?: number;
+          position?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "gsc_search_data_gsc_property_id_fkey";
+            columns: ["gsc_property_id"];
+            isOneToOne: false;
+            referencedRelation: "gsc_properties";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+
+      country_code_mapping: {
+        Row: {
+          alpha3: string;
+          alpha2: string;
+          location_code: number | null;
+        };
+        Insert: {
+          alpha3: string;
+          alpha2: string;
+          location_code?: number | null;
+        };
+        Update: {
+          alpha3?: string;
+          alpha2?: string;
+          location_code?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "country_code_mapping_location_code_fkey";
+            columns: ["location_code"];
+            isOneToOne: false;
+            referencedRelation: "locations";
+            referencedColumns: ["code"];
+          },
+        ];
+      };
+
+      gsc_auto_rules: {
+        Row: {
+          id: string;
+          user_id: string;
+          min_clicks_keyword: number;
+          min_clicks_page_daily: number;
+          auto_add_enabled: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          min_clicks_keyword?: number;
+          min_clicks_page_daily?: number;
+          auto_add_enabled?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          min_clicks_keyword?: number;
+          min_clicks_page_daily?: number;
+          auto_add_enabled?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+
       api_usage_log: {
         Row: {
           id: string;
@@ -602,6 +750,10 @@ export type AlertRule = Tables["alert_rules"]["Row"];
 export type IndexerTask = Tables["indexer_tasks"]["Row"];
 export type SitePage = Tables["site_pages"]["Row"];
 export type ApiUsageLog = Tables["api_usage_log"]["Row"];
+export type GscProperty = Tables["gsc_properties"]["Row"];
+export type GscSearchData = Tables["gsc_search_data"]["Row"];
+export type CountryCodeMapping = Tables["country_code_mapping"]["Row"];
+export type GscAutoRule = Tables["gsc_auto_rules"]["Row"];
 
 // ---------------------------------------------------------------------------
 // Insert Type Aliases
@@ -618,6 +770,9 @@ export type AlertRuleInsert = Tables["alert_rules"]["Insert"];
 export type IndexerTaskInsert = Tables["indexer_tasks"]["Insert"];
 export type SitePageInsert = Tables["site_pages"]["Insert"];
 export type ApiUsageLogInsert = Tables["api_usage_log"]["Insert"];
+export type GscPropertyInsert = Tables["gsc_properties"]["Insert"];
+export type GscSearchDataInsert = Tables["gsc_search_data"]["Insert"];
+export type GscAutoRuleInsert = Tables["gsc_auto_rules"]["Insert"];
 
 // ---------------------------------------------------------------------------
 // Update Type Aliases

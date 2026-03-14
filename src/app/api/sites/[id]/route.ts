@@ -196,6 +196,12 @@ export async function DELETE(
       );
     }
 
+    // Delete associated GSC properties (and their search data via cascade)
+    await supabase
+      .from("gsc_properties")
+      .delete()
+      .eq("site_id", id);
+
     const { error } = await supabase
       .from("sites")
       .delete()

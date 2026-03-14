@@ -3,7 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSitemapUrls } from "@/lib/sitemap/parser";
 import { extractSlugFromUrl, slugToKeyword } from "@/lib/sitemap/slug";
 import { DataForSeoClient } from "@/lib/dataforseo/client";
-import { createIndexerService } from "@/lib/indexer/factory";
+import { gscClient } from "@/lib/google/search-console";
+import { RapidIndexerService } from "@/lib/indexer/rapid-indexer";
 
 export const maxDuration = 300; // 5 minutes
 
@@ -102,22 +103,45 @@ export async function GET(request: Request) {
     }
   }
 
-  // Auto-submit not-indexed URLs to Rapid Indexer for reindexation
+  // Auto-submit not-indexed URLs via Google Indexing API + Rapid Indexer
+  let googleReindexed = 0;
+  let rapidReindexed = 0;
+
   if (notIndexedUrls.length > 0) {
+    const urls = notIndexedUrls.map((n) => n.url);
+
+    // 1. Google Indexing API (limit 200/day)
+    if (gscClient.isConfigured()) {
+      const batch = urls.slice(0, 200);
+      const result = await gscClient.notifyUrlUpdateBatch(batch);
+      googleReindexed = result.submitted;
+      if (result.errors.length > 0) {
+        console.error("[CRON-INDEX] Google Indexing errors:", result.errors);
+      }
+    }
+
+    // 2. Rapid Indexer (all URLs, no daily limit)
     try {
-      const indexer = createIndexerService();
-      const urls = notIndexedUrls.map((n) => n.url);
-      const { taskId } = await indexer.submitUrls(urls);
+      const rapidIndexer = new RapidIndexerService();
+      const { taskId } = await rapidIndexer.submitUrls(urls);
+      rapidReindexed = urls.length;
 
       await supabase.from("indexer_tasks").insert({
         task_id: taskId,
         urls,
         status: "pending",
       });
-
-      console.log(`[CRON-INDEX] Auto-submitted ${urls.length} not-indexed URLs to Rapid Indexer (task ${taskId})`);
     } catch (err) {
-      console.error("[CRON-INDEX] Rapid Indexer auto-submit error:", err);
+      console.error("[CRON-INDEX] Rapid Indexer error:", err);
+    }
+
+    // Update status for all not-indexed URLs
+    for (const entry of notIndexedUrls) {
+      await supabase
+        .from("site_pages")
+        .update({ index_status: "reindex_submitted" })
+        .eq("site_id", entry.siteId)
+        .eq("url", entry.url);
     }
   }
 
@@ -147,6 +171,7 @@ export async function GET(request: Request) {
     apiCalls: totalApiCalls,
     indexed: totalIndexed,
     notIndexed: totalNotIndexed,
-    autoReindexed: notIndexedUrls.length,
+    googleReindexed,
+    rapidReindexed,
   });
 }

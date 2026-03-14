@@ -150,9 +150,11 @@ export default function IndexationPage() {
   async function handleReindexAll() {
     setSubmitting(true);
     try {
-      const detectedUrls = deindexed
-        .filter((d) => d.status === "detected")
-        .map((d) => d.url);
+      const detectedUrls = [...new Set(
+        deindexed
+          .filter((d) => d.status === "detected")
+          .map((d) => d.url)
+      )];
 
       if (detectedUrls.length === 0) {
         toast.info("No URLs to reindex");
@@ -244,9 +246,11 @@ export default function IndexationPage() {
   }
 
   async function handleReindexNotIndexed() {
-    const notIndexedUrls = filteredPages
-      .filter((p) => p.index_status === "not_indexed")
-      .map((p) => p.url);
+    const notIndexedUrls = [...new Set(
+      filteredPages
+        .filter((p) => p.index_status === "not_indexed")
+        .map((p) => p.url)
+    )];
 
     if (notIndexedUrls.length === 0) {
       toast.info("No not-indexed URLs to reindex");

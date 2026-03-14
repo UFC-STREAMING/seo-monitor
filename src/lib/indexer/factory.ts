@@ -6,6 +6,7 @@
 
 import type { IndexerService } from "./interface";
 import { RapidIndexerService } from "./rapid-indexer";
+import { GoogleIndexingService } from "./google-indexing";
 
 /**
  * Create and return the active IndexerService implementation.
@@ -13,6 +14,11 @@ import { RapidIndexerService } from "./rapid-indexer";
  * To switch providers (e.g. SpeedyIndex, IndexNow, etc.) simply swap the
  * return value here -- no other files need to change.
  */
-export function createIndexerService(): IndexerService {
-  return new RapidIndexerService();
+export function createIndexerService(
+  provider: "google" | "rapid" = "google"
+): IndexerService {
+  if (provider === "rapid") {
+    return new RapidIndexerService();
+  }
+  return new GoogleIndexingService();
 }
