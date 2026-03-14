@@ -121,7 +121,7 @@ export async function GET() {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -130,6 +130,50 @@ export async function DELETE() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Accept a custom list of keyword strings from the client
+    let keywordsToRemove: string[] | null = null;
+    try {
+      const body = await request.json();
+      if (Array.isArray(body.keywords) && body.keywords.length > 0) {
+        keywordsToRemove = body.keywords;
+      }
+    } catch {
+      // No body = use auto-detected secondary keywords
+    }
+
+    // Get user's site IDs for ownership check
+    const { data: sites } = await supabase
+      .from("sites")
+      .select("id")
+      .eq("user_id", user.id);
+
+    if (!sites || sites.length === 0) {
+      return NextResponse.json({ message: "No sites found", removed: 0 });
+    }
+
+    const siteIds = sites.map((s) => s.id);
+
+    if (keywordsToRemove) {
+      // Delete specific keywords chosen by user
+      let removed = 0;
+      const CHUNK = 20;
+      for (let i = 0; i < keywordsToRemove.length; i += CHUNK) {
+        const chunk = keywordsToRemove.slice(i, i + CHUNK);
+        const { count } = await supabase
+          .from("keywords")
+          .delete({ count: "exact" })
+          .in("keyword", chunk)
+          .in("site_id", siteIds);
+        removed += count ?? 0;
+      }
+
+      return NextResponse.json({
+        message: `Removed ${removed} keyword entries`,
+        removed,
+      });
+    }
+
+    // Fallback: auto-detected secondary keywords
     const { secondary, error } = await getSecondaryKeywords(supabase, user.id);
 
     if (error) {
@@ -140,7 +184,6 @@ export async function DELETE() {
       return NextResponse.json({ message: "No secondary keywords to remove", removed: 0 });
     }
 
-    // Delete in chunks of 100
     let removed = 0;
     const CHUNK = 100;
     for (let i = 0; i < secondary.length; i += CHUNK) {

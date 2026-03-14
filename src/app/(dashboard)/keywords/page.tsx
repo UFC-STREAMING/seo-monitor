@@ -72,6 +72,9 @@ export default function KeywordsPage() {
     totalEntries: number;
   } | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  // User overrides: keywords moved from keep→remove or remove→keep
+  const [movedToRemove, setMovedToRemove] = useState<Set<string>>(new Set());
+  const [movedToKeep, setMovedToKeep] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -254,6 +257,8 @@ export default function KeywordsPage() {
       const data = await res.json();
       if (res.ok) {
         setCleanupPreview(data);
+        setMovedToRemove(new Set());
+        setMovedToKeep(new Set());
         setCleanupOpen(true);
       } else {
         toast.error(data.error || "Failed to preview cleanup");
@@ -266,14 +271,29 @@ export default function KeywordsPage() {
   }
 
   async function handleCleanupConfirm() {
+    if (!cleanupPreview) return;
     setCleaning(true);
     try {
-      const res = await fetch("/api/keywords/cleanup", { method: "DELETE" });
+      // Build final remove list: original toRemove - movedToKeep + movedToRemove
+      const finalRemove = [
+        ...cleanupPreview.toRemove
+          .filter((r) => !movedToKeep.has(r.keyword))
+          .map((r) => r.keyword),
+        ...movedToRemove,
+      ];
+
+      const res = await fetch("/api/keywords/cleanup", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords: finalRemove }),
+      });
       const data = await res.json();
       if (res.ok) {
         toast.success(data.message || `${data.removed} keywords removed`);
         setCleanupOpen(false);
         setCleanupPreview(null);
+        setMovedToRemove(new Set());
+        setMovedToKeep(new Set());
         setLoading(true);
         await fetchData();
       } else {
@@ -284,6 +304,30 @@ export default function KeywordsPage() {
     } finally {
       setCleaning(false);
     }
+  }
+
+  function toggleToRemove(keyword: string) {
+    setMovedToRemove((prev) => {
+      const next = new Set(prev);
+      if (next.has(keyword)) {
+        next.delete(keyword);
+      } else {
+        next.add(keyword);
+      }
+      return next;
+    });
+  }
+
+  function toggleToKeep(keyword: string) {
+    setMovedToKeep((prev) => {
+      const next = new Set(prev);
+      if (next.has(keyword)) {
+        next.delete(keyword);
+      } else {
+        next.add(keyword);
+      }
+      return next;
+    });
   }
 
   async function handleSyncKeywords() {
@@ -483,48 +527,83 @@ export default function KeywordsPage() {
           <DialogHeader>
             <DialogTitle>Cleanup Secondary Keywords</DialogTitle>
             <DialogDescription>
-              Keep only brand names and remove long-tail variants.
+              Click a keyword to move it between keep and remove.
             </DialogDescription>
           </DialogHeader>
-          {cleanupPreview && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium mb-2">
-                  Brands to keep ({cleanupPreview.brands.length}):
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {cleanupPreview.brands.map((b) => (
-                    <Badge key={b} variant="outline" className="text-green-600">
-                      {b}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              {cleanupPreview.toRemove.length > 0 && (
+          {cleanupPreview && (() => {
+            // Compute final lists with user overrides
+            const finalBrands = [
+              ...cleanupPreview.brands.filter((b) => !movedToRemove.has(b)),
+              ...cleanupPreview.toRemove
+                .filter((r) => movedToKeep.has(r.keyword))
+                .map((r) => r.keyword),
+            ];
+            const finalRemove = [
+              ...cleanupPreview.toRemove.filter((r) => !movedToKeep.has(r.keyword)),
+              ...cleanupPreview.brands
+                .filter((b) => movedToRemove.has(b))
+                .map((b) => ({ keyword: b, count: 0 })),
+            ];
+            const finalRemoveCount = finalRemove.reduce((sum, r) => sum + (r.count || 1), 0);
+
+            return (
+              <div className="space-y-4">
                 <div>
                   <p className="text-sm font-medium mb-2">
-                    Keywords to remove ({cleanupPreview.totalEntries} entries):
+                    Brands to keep ({finalBrands.length}):
                   </p>
                   <div className="flex flex-wrap gap-1">
-                    {cleanupPreview.toRemove.map((r) => (
+                    {finalBrands.map((b) => (
                       <Badge
-                        key={r.keyword}
-                        variant="destructive"
-                        className="text-xs"
+                        key={b}
+                        variant="outline"
+                        className="text-green-600 cursor-pointer hover:bg-red-50 hover:text-red-600 hover:border-red-300 transition-colors"
+                        onClick={() => {
+                          if (movedToKeep.has(b)) {
+                            toggleToKeep(b);
+                          } else {
+                            toggleToRemove(b);
+                          }
+                        }}
                       >
-                        {r.keyword} ({r.count})
+                        {b}
                       </Badge>
                     ))}
                   </div>
                 </div>
-              )}
-              {cleanupPreview.toRemove.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No secondary keywords found. Everything is clean!
-                </p>
-              )}
-            </div>
-          )}
+                {finalRemove.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">
+                      Keywords to remove ({finalRemoveCount} entries):
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {finalRemove.map((r) => (
+                        <Badge
+                          key={r.keyword}
+                          variant="destructive"
+                          className="text-xs cursor-pointer hover:bg-green-100 hover:text-green-700 transition-colors"
+                          onClick={() => {
+                            if (movedToRemove.has(r.keyword)) {
+                              toggleToRemove(r.keyword);
+                            } else {
+                              toggleToKeep(r.keyword);
+                            }
+                          }}
+                        >
+                          {r.keyword} {r.count > 0 && `(${r.count})`}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {finalRemove.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No keywords to remove.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           <DialogFooter>
             <Button
               variant="outline"
@@ -533,15 +612,16 @@ export default function KeywordsPage() {
             >
               Cancel
             </Button>
-            {cleanupPreview && cleanupPreview.toRemove.length > 0 && (
+            {cleanupPreview && (
               <Button
                 variant="destructive"
                 onClick={handleCleanupConfirm}
-                disabled={cleaning}
+                disabled={cleaning || (
+                  cleanupPreview.toRemove.filter((r) => !movedToKeep.has(r.keyword)).length === 0
+                  && movedToRemove.size === 0
+                )}
               >
-                {cleaning
-                  ? "Removing..."
-                  : `Remove ${cleanupPreview.totalEntries} entries`}
+                {cleaning ? "Removing..." : "Confirm removal"}
               </Button>
             )}
           </DialogFooter>
