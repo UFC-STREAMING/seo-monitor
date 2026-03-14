@@ -36,23 +36,48 @@ async function getSecondaryKeywords(supabase: any, userId: string) {
     // Sort by length (shortest first) so brands come before their variants
     uniqueKeywords.sort((a, b) => a.length - b.length);
 
-    // Find brand keywords: a keyword is a brand if no shorter keyword is its prefix
+    // Pass 1: if keyword A exists and keyword B starts with "A ", B is secondary
     const brandSet = new Set<string>();
+    const secondarySet = new Set<string>();
 
     uniqueKeywords.forEach((kw) => {
-      const isSuffix = [...brandSet].some(
-        (brand) => kw !== brand && kw.startsWith(brand + " ")
+      const kwLower = kw.toLowerCase();
+      const isVariant = [...brandSet].some(
+        (brand) => kwLower !== brand.toLowerCase() && kwLower.startsWith(brand.toLowerCase() + " ")
       );
-      if (!isSuffix) {
+      if (isVariant) {
+        secondarySet.add(kw);
+      } else {
         brandSet.add(kw);
+      }
+    });
+
+    // Pass 2: among remaining brands, group by first word.
+    // If multiple keywords share the same first word, keep only the shortest.
+    const byFirstWord = new Map<string, string[]>();
+    brandSet.forEach((kw) => {
+      const firstWord = kw.toLowerCase().split(" ")[0];
+      const list = byFirstWord.get(firstWord) || [];
+      list.push(kw);
+      byFirstWord.set(firstWord, list);
+    });
+
+    byFirstWord.forEach((kwGroup) => {
+      if (kwGroup.length <= 1) return;
+      // Sort by length, keep only the shortest
+      kwGroup.sort((a, b) => a.length - b.length);
+      const keep = kwGroup[0];
+      for (let i = 1; i < kwGroup.length; i++) {
+        brandSet.delete(kwGroup[i]);
+        secondarySet.add(kwGroup[i]);
       }
     });
 
     brandSet.forEach((b) => brands.push(b));
 
-    // All keyword entries (across all sites) that are NOT brands are secondary
+    // All keyword entries (across all sites) that are secondary
     kwList.forEach((k) => {
-      if (!brandSet.has(k.keyword)) {
+      if (secondarySet.has(k.keyword)) {
         secondary.push({ id: k.id, keyword: k.keyword, location_code: locationCode });
       }
     });

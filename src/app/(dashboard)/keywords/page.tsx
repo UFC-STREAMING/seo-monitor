@@ -293,6 +293,12 @@ export default function KeywordsPage() {
       const data = await res.json();
       if (res.ok) {
         toast.success(data.message || `${data.added} keywords synced`);
+        if (data.sites_without_location?.length > 0) {
+          toast.warning(
+            `Sites without country (not synced): ${data.sites_without_location.join(", ")}`,
+            { duration: 10000 }
+          );
+        }
         setLoading(true);
         await fetchData();
       } else {

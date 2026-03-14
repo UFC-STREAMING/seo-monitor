@@ -15,15 +15,21 @@ export async function POST() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get all user sites
-    const { data: sites } = await supabase
+    // Get all user sites (including those without location_code for diagnostics)
+    const { data: allSites } = await supabase
       .from("sites")
-      .select("id, location_code")
-      .eq("user_id", user.id)
-      .not("location_code", "is", null);
+      .select("id, domain, location_code")
+      .eq("user_id", user.id);
 
-    if (!sites || sites.length === 0) {
-      return NextResponse.json({ message: "No sites found", added: 0 });
+    const sitesWithoutLocation = (allSites ?? []).filter((s) => !s.location_code);
+    const sites = (allSites ?? []).filter((s) => s.location_code);
+
+    if (sites.length === 0) {
+      return NextResponse.json({
+        message: "No sites with a location_code found. Set country on your sites first.",
+        added: 0,
+        sites_without_location: sitesWithoutLocation.map((s) => s.domain),
+      });
     }
 
     // Get all existing keywords for user's sites
@@ -64,7 +70,13 @@ export async function POST() {
     });
 
     if (toInsert.length === 0) {
-      return NextResponse.json({ message: "All sites already have all keywords", added: 0 });
+      return NextResponse.json({
+        message: "All sites already have all keywords",
+        added: 0,
+        total_sites: sites.length,
+        total_keywords: uniqueKeywords.size,
+        sites_without_location: sitesWithoutLocation.map((s) => s.domain),
+      });
     }
 
     // Insert in chunks
@@ -77,8 +89,10 @@ export async function POST() {
     }
 
     return NextResponse.json({
-      message: `Synced ${added} keyword entries across sites`,
+      message: `Synced ${added} keyword entries across ${sites.length} sites`,
       added,
+      total_sites: sites.length,
+      sites_without_location: sitesWithoutLocation.map((s) => s.domain),
     });
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
