@@ -43,31 +43,9 @@ export async function GET(
       .eq("site_id", id)
       .order("keyword");
 
-    // Fetch latest positions for all keywords
-    const keywordIds = (keywords ?? []).map((k) => k.id);
-    const { data: positions } = await supabase
-      .from("keyword_positions")
-      .select("*")
-      .eq("site_id", id)
-      .in("keyword_id", keywordIds.length > 0 ? keywordIds : ["none"])
-      .order("checked_at", { ascending: false });
-
-    // Build position map (latest per keyword)
-    const posMap = new Map<string, (typeof positions extends (infer T)[] | null ? T : never)>();
-    positions?.forEach((p) => {
-      if (!posMap.has(p.keyword_id)) {
-        posMap.set(p.keyword_id, p);
-      }
-    });
-
-    const keywordsWithPositions = (keywords ?? []).map((k) => ({
-      ...k,
-      latest_position: posMap.get(k.id) ?? null,
-    }));
-
     return NextResponse.json({
       ...site,
-      keywords: keywordsWithPositions,
+      keywords: keywords ?? [],
     });
   } catch (err) {
     return NextResponse.json(

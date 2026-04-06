@@ -21,8 +21,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { FileWarning, RefreshCw, CheckCircle, Search, Globe, AlertTriangle } from "lucide-react";
+import { FileWarning, RefreshCw, CheckCircle, Search, Globe, AlertTriangle, Clock, Package } from "lucide-react";
 import { toast } from "sonner";
+
+interface SiteStats {
+  site_id: string;
+  domain: string;
+  total_pages: number;
+  indexed: number;
+  not_indexed: number;
+  submitted: number;
+  unknown: number;
+  recently_submitted_7d: number;
+  webhook_pages: WebhookPage[];
+}
+
+interface WebhookPage {
+  url: string;
+  product_name: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  indexed_at: string | null;
+  index_status: string;
+  days_to_index: number | null;
+}
 
 interface DeindexedRow {
   id: string;
@@ -63,6 +85,7 @@ export default function IndexationPage() {
   const [tasks, setTasks] = useState<IndexerTaskRow[]>([]);
   const [pages, setPages] = useState<SitePageRow[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
+  const [siteStats, setSiteStats] = useState<SiteStats[]>([]);
   const [credits, setCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -140,6 +163,17 @@ export default function IndexationPage() {
       // ignore
     }
 
+    // Fetch indexation stats per site
+    try {
+      const statsRes = await fetch("/api/indexation/stats");
+      if (statsRes.ok) {
+        const data = await statsRes.json();
+        setSiteStats(Array.isArray(data) ? data : []);
+      }
+    } catch {
+      // ignore
+    }
+
     setLoading(false);
   }, []);
 
@@ -195,7 +229,7 @@ export default function IndexationPage() {
     }
   }
 
-  async function handleScan(method: "google" | "rapid") {
+  async function handleScan(method: "gsc" | "rapid") {
     if (selectedSite === "all") {
       toast.error("Please select a specific site to scan");
       return;
@@ -228,9 +262,9 @@ export default function IndexationPage() {
         return;
       }
 
-      if (method === "google") {
+      if (method === "gsc") {
         toast.success(
-          `Google check complete: ${data.indexed} indexed, ${data.notIndexed} not indexed (${data.apiCalls} API calls)`
+          `GSC check complete: ${data.indexed} indexed, ${data.notIndexed} not indexed`
         );
       } else {
         toast.success(data.message || `Submitted ${data.urlsSubmitted} URLs for checking`);
@@ -320,6 +354,153 @@ export default function IndexationPage() {
           </Button>
         </div>
       </div>
+
+      {/* Per-Site Indexation Stats */}
+      {siteStats.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {siteStats.map((s) => (
+            <Card key={s.site_id}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium truncate">
+                  {s.domain}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div>
+                    <div className="text-lg font-bold">{s.total_pages}</div>
+                    <div className="text-xs text-muted-foreground">Total</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-bold text-green-600">{s.indexed}</div>
+                    <div className="text-xs text-muted-foreground">Indexed</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-bold text-destructive">{s.not_indexed}</div>
+                    <div className="text-xs text-muted-foreground">Not Idx</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-bold text-orange-500">{s.submitted}</div>
+                    <div className="text-xs text-muted-foreground">Submitted</div>
+                  </div>
+                </div>
+                {s.recently_submitted_7d > 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {s.recently_submitted_7d} soumis ces 7 derniers jours
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Product Timeline (webhook pages) */}
+      {siteStats.some((s) => s.webhook_pages.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Timeline Produits (via Nutra Factory)
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Suivi des fiches produits depuis leur creation jusqu&apos;a leur indexation
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Produit</TableHead>
+                  <TableHead>Site</TableHead>
+                  <TableHead>Recu</TableHead>
+                  <TableHead>Soumis</TableHead>
+                  <TableHead>Indexe</TableHead>
+                  <TableHead>Delai</TableHead>
+                  <TableHead>Statut</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {siteStats.flatMap((s) =>
+                  s.webhook_pages.map((wp, i) => {
+                    const daysSinceSubmit = wp.submitted_at
+                      ? Math.round(
+                          (Date.now() - new Date(wp.submitted_at).getTime()) /
+                            (1000 * 60 * 60 * 24)
+                        )
+                      : 0;
+                    const isStale =
+                      wp.index_status !== "indexed" && daysSinceSubmit > 7;
+
+                    return (
+                      <TableRow key={`${s.site_id}-${i}`}>
+                        <TableCell className="font-medium">
+                          {wp.product_name ?? (
+                            <span className="text-muted-foreground text-xs truncate max-w-[200px] block">
+                              {wp.url}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">{s.domain}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {new Date(wp.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {wp.submitted_at
+                            ? new Date(wp.submitted_at).toLocaleDateString()
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {wp.indexed_at
+                            ? new Date(wp.indexed_at).toLocaleDateString()
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {wp.days_to_index !== null ? (
+                            <span className="text-green-600">{wp.days_to_index}j</span>
+                          ) : wp.submitted_at ? (
+                            <span className="text-muted-foreground">
+                              {daysSinceSubmit}j...
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              wp.index_status === "indexed"
+                                ? "outline"
+                                : isStale
+                                  ? "destructive"
+                                  : "secondary"
+                            }
+                            className={
+                              wp.index_status === "indexed"
+                                ? "text-green-600"
+                                : isStale
+                                  ? ""
+                                  : "text-yellow-600"
+                            }
+                          >
+                            {wp.index_status === "indexed" && (
+                              <CheckCircle className="mr-1 h-3 w-3" />
+                            )}
+                            {isStale && (
+                              <Clock className="mr-1 h-3 w-3" />
+                            )}
+                            {wp.index_status}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Deindex Stats */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -506,12 +687,12 @@ export default function IndexationPage() {
             </div>
 
             <Button
-              onClick={() => handleScan("google")}
+              onClick={() => handleScan("gsc")}
               disabled={scanning || selectedSite === "all"}
               variant="default"
             >
               <Globe className={`mr-2 h-4 w-4 ${scanning ? "animate-spin" : ""}`} />
-              {scanning ? "Scanning..." : "Google Check (DataForSEO)"}
+              {scanning ? "Scanning..." : "GSC Check"}
             </Button>
 
             <Button

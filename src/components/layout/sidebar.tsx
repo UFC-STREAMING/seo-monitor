@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Globe,
-  Search,
   FileWarning,
   Bell,
   DollarSign,
@@ -21,7 +20,6 @@ import { useRouter } from "next/navigation";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Sites", href: "/sites", icon: Globe },
-  { name: "Keywords", href: "/keywords", icon: Search },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileWarning },
   { name: "Network", href: "/network", icon: Network },

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { discoverSitemapUrls } from "@/lib/sitemap/parser";
-import { extractSlugFromUrl, slugToKeyword, urlContainsSlug } from "@/lib/sitemap/slug";
-import { DataForSeoClient } from "@/lib/dataforseo/client";
 import { createIndexerService } from "@/lib/indexer/factory";
 
 export const maxDuration = 300; // 5 minutes max
@@ -12,7 +10,7 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { siteId, method = "google", urls: manualUrls } = await request.json();
+  const { siteId, method = "gsc", urls: manualUrls } = await request.json();
 
   if (!siteId) {
     return NextResponse.json({ error: "siteId is required" }, { status: 400 });
@@ -21,7 +19,7 @@ export async function POST(request: Request) {
   // Get site info
   const { data: site } = await supabase
     .from("sites")
-    .select("id, domain, location_code, locations(default_language)")
+    .select("id, domain")
     .eq("id", siteId)
     .eq("user_id", user.id)
     .single();
@@ -45,14 +43,13 @@ export async function POST(request: Request) {
     }
   }
 
-  // Upsert URLs into site_pages (ignore duplicates)
+  // Upsert URLs into site_pages
   const toUpsert = urls.map((url) => ({
     site_id: siteId,
     url,
     source,
   }));
 
-  // Batch upsert in chunks of 500
   for (let i = 0; i < toUpsert.length; i += 500) {
     const chunk = toUpsert.slice(i, i + 500);
     await supabase
@@ -61,14 +58,9 @@ export async function POST(request: Request) {
   }
 
   if (method === "rapid") {
-    // Quick scan via Rapid Indexer checker
     return await handleRapidCheck(supabase, siteId, urls, user.id);
   } else {
-    // Google check via DataForSEO site: queries
-    const loc = site.locations as unknown as { default_language: string } | null;
-    const locationCode = site.location_code ?? 2840; // default US
-    const language = loc?.default_language ?? "en";
-    return await handleGoogleCheck(supabase, site.domain, siteId, urls, locationCode, language, user.id);
+    return await handleGscCheck(supabase, siteId, urls, user.id);
   }
 }
 
@@ -82,14 +74,12 @@ async function handleRapidCheck(
     const indexer = createIndexerService();
     const { taskId } = await indexer.checkUrls(urls);
 
-    // Update site_pages with the checker task ID
     await supabase
       .from("site_pages")
       .update({ checker_task_id: taskId, index_status: "checking" })
       .eq("site_id", siteId)
       .in("url", urls);
 
-    // Log usage
     await supabase.from("api_usage_log").insert({
       user_id: userId,
       service: "rapid_indexer",
@@ -112,79 +102,88 @@ async function handleRapidCheck(
   }
 }
 
-async function handleGoogleCheck(
+async function handleGscCheck(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  domain: string,
   siteId: string,
   urls: string[],
-  locationCode: number,
-  language: string,
   userId: string,
 ) {
-  const dataforseo = new DataForSeoClient();
-  let apiCalls = 0;
+  // Get the GSC property linked to this site
+  const { data: gscProperty } = await supabase
+    .from("gsc_properties")
+    .select("id")
+    .eq("site_id", siteId)
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+
+  if (!gscProperty) {
+    return NextResponse.json(
+      { error: "No GSC property linked to this site. Link one in the Search Console page." },
+      { status: 400 },
+    );
+  }
+
+  // Get pages that appear in GSC (last 30 days = indexed)
+  const sinceDate = new Date();
+  sinceDate.setDate(sinceDate.getDate() - 30);
+  const dateStr = sinceDate.toISOString().split("T")[0];
+
+  const { data: gscPages } = await supabase
+    .from("gsc_search_data")
+    .select("page")
+    .eq("gsc_property_id", gscProperty.id)
+    .gte("date", dateStr)
+    .gt("impressions", 0)
+    .not("page", "is", null);
+
+  const indexedPages = new Set(
+    (gscPages ?? []).filter((p: { page: string | null }) => p.page !== null).map((p: { page: string | null }) => p.page as string)
+  );
+
   let indexed = 0;
   let notIndexed = 0;
-  const errors: string[] = [];
+  const now = new Date().toISOString();
 
   for (const url of urls) {
-    const slug = extractSlugFromUrl(url);
-    if (!slug) {
-      // Skip URLs without a meaningful slug (homepage, etc.)
-      continue;
-    }
-
-    const keyword = slugToKeyword(slug);
-
-    try {
-      const result = await dataforseo.checkIndexation(
-        domain,
-        keyword,
-        slug,
-        locationCode,
-        language,
-      );
-      apiCalls++;
-
-      const now = new Date().toISOString();
-      if (result.indexed) {
-        indexed++;
-        await supabase
-          .from("site_pages")
-          .update({ index_status: "indexed", last_checked_at: now })
-          .eq("site_id", siteId)
-          .eq("url", url);
-      } else {
-        notIndexed++;
-        await supabase
-          .from("site_pages")
-          .update({ index_status: "not_indexed", last_checked_at: now })
-          .eq("site_id", siteId)
-          .eq("url", url);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`${url}: ${msg}`);
+    if (indexedPages.has(url)) {
+      indexed++;
+      await supabase
+        .from("site_pages")
+        .update({
+          index_status: "indexed",
+          last_checked_at: now,
+          indexed_at: now,
+        })
+        .eq("site_id", siteId)
+        .eq("url", url);
+    } else {
+      notIndexed++;
+      await supabase
+        .from("site_pages")
+        .update({
+          index_status: "not_indexed",
+          last_checked_at: now,
+        })
+        .eq("site_id", siteId)
+        .eq("url", url);
     }
   }
 
-  // Log API usage
-  if (apiCalls > 0) {
-    await supabase.from("api_usage_log").insert({
-      user_id: userId,
-      service: "dataforseo",
-      endpoint: "serp/google/organic/live (site: check)",
-      credits_used: apiCalls,
-      cost_usd: apiCalls * 0.002,
-    });
-  }
+  // Log usage (GSC = free)
+  await supabase.from("api_usage_log").insert({
+    user_id: userId,
+    service: "gsc",
+    endpoint: "indexation/gsc-check",
+    credits_used: 0,
+    cost_usd: 0,
+  });
 
   return NextResponse.json({
-    method: "google",
+    method: "gsc",
     totalUrls: urls.length,
     indexed,
     notIndexed,
-    apiCalls,
-    errors: errors.length > 0 ? errors : undefined,
   });
 }

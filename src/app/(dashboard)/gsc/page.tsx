@@ -36,19 +36,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   RefreshCw,
-  ArrowUp,
-  ArrowDown,
-  Minus,
   Settings2,
   Zap,
   Globe,
   MousePointerClick,
   Eye,
   Target,
+  TrendingDown,
+  Lightbulb,
+  Flame,
 } from "lucide-react";
 import { toast } from "sonner";
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface GscPropertyWithStats {
   id: string;
@@ -72,6 +75,37 @@ interface TopQuery {
   property_site_url: string;
 }
 
+interface TrafficDrop {
+  page: string;
+  clicks_before: number;
+  clicks_after: number;
+  pct_change: number;
+  property_site_url: string;
+  top_queries: Array<{ query: string; clicks: number }>;
+}
+
+interface Opportunity {
+  query: string;
+  country: string;
+  impressions: number;
+  clicks: number;
+  avg_position: number;
+  avg_ctr: number;
+  top_page: string | null;
+  property_site_url: string;
+}
+
+interface PowerScoreItem {
+  query: string;
+  country: string;
+  impressions: number;
+  clicks: number;
+  avg_position: number;
+  power_score: number;
+  estimated_traffic_top3: number;
+  property_site_url: string;
+}
+
 interface AutoRules {
   min_clicks_keyword: number;
   min_clicks_page_daily: number;
@@ -82,6 +116,8 @@ interface UserSite {
   id: string;
   domain: string;
 }
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function extractDomain(siteUrl: string): string {
   if (siteUrl.startsWith("sc-domain:")) {
@@ -114,9 +150,14 @@ function getFlag(alpha3: string): string {
     .join("");
 }
 
+// ── Component ────────────────────────────────────────────────────────────────
+
 export default function GscPage() {
   const [properties, setProperties] = useState<GscPropertyWithStats[]>([]);
   const [topQueries, setTopQueries] = useState<TopQuery[]>([]);
+  const [trafficDrops, setTrafficDrops] = useState<TrafficDrop[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [powerScores, setPowerScores] = useState<PowerScoreItem[]>([]);
   const [rules, setRules] = useState<AutoRules>({
     min_clicks_keyword: 5,
     min_clicks_page_daily: 5,
@@ -130,6 +171,8 @@ export default function GscPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filterCountry, setFilterCountry] = useState<string>("all");
   const [days, setDays] = useState<string>("28");
+  const [dropDays, setDropDays] = useState<string>("7");
+  const [activeTab, setActiveTab] = useState("overview");
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -161,9 +204,41 @@ export default function GscPage() {
     setLoading(false);
   }, [days]);
 
+  // Fetch analytics data when tab changes
+  useEffect(() => {
+    if (loading) return;
+
+    if (activeTab === "drops" && trafficDrops.length === 0) {
+      fetch(`/api/gsc/analytics?mode=traffic_drops&days=${dropDays}&threshold=20`)
+        .then((r) => r.json())
+        .then((data) => setTrafficDrops(Array.isArray(data) ? data : []));
+    }
+    if (activeTab === "opportunities" && opportunities.length === 0) {
+      fetch(`/api/gsc/analytics?mode=opportunities&days=${days}&min_impressions=100&min_position=5&limit=50`)
+        .then((r) => r.json())
+        .then((data) => setOpportunities(Array.isArray(data) ? data : []));
+    }
+    if (activeTab === "power" && powerScores.length === 0) {
+      fetch(`/api/gsc/analytics?mode=power_score&days=${days}&min_position=10&min_impressions=50&limit=50`)
+        .then((r) => r.json())
+        .then((data) => setPowerScores(Array.isArray(data) ? data : []));
+    }
+  }, [activeTab, loading, days, dropDays, trafficDrops.length, opportunities.length, powerScores.length]);
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Reset analytics when period changes
+  useEffect(() => {
+    setTrafficDrops([]);
+    setOpportunities([]);
+    setPowerScores([]);
+  }, [days]);
+
+  useEffect(() => {
+    setTrafficDrops([]);
+  }, [dropDays]);
 
   async function handleSyncProperties() {
     setSyncingProperties(true);
@@ -193,6 +268,9 @@ export default function GscPage() {
       const data = await res.json();
       if (res.ok) {
         toast.success(data.message || "Data synced");
+        setTrafficDrops([]);
+        setOpportunities([]);
+        setPowerScores([]);
         fetchData();
       } else {
         toast.error(data.error || "Failed to sync data");
@@ -252,14 +330,8 @@ export default function GscPage() {
   }
 
   // Stats
-  const totalClicks = properties.reduce(
-    (sum, p) => sum + p.stats_7d.clicks,
-    0
-  );
-  const totalImpressions = properties.reduce(
-    (sum, p) => sum + p.stats_7d.impressions,
-    0
-  );
+  const totalClicks = properties.reduce((sum, p) => sum + p.stats_7d.clicks, 0);
+  const totalImpressions = properties.reduce((sum, p) => sum + p.stats_7d.impressions, 0);
 
   const periodLabel: Record<string, string> = {
     "4": "24h",
@@ -268,7 +340,6 @@ export default function GscPage() {
     "90": "3 mois",
   };
 
-  // Get unique countries from top queries
   const countries = [...new Set(topQueries.map((q) => q.country))].sort();
 
   const filteredQueries =
@@ -348,9 +419,7 @@ export default function GscPage() {
                     }
                     className="rounded"
                   />
-                  <Label htmlFor="auto-add">
-                    Auto-add keywords to tracker
-                  </Label>
+                  <Label htmlFor="auto-add">Auto-add keywords to tracker</Label>
                 </div>
               </div>
               <DialogFooter>
@@ -359,25 +428,13 @@ export default function GscPage() {
             </DialogContent>
           </Dialog>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSyncProperties}
-            disabled={syncingProperties}
-          >
+          <Button variant="outline" size="sm" onClick={handleSyncProperties} disabled={syncingProperties}>
             <Globe className="h-4 w-4 mr-1" />
             {syncingProperties ? "Syncing..." : "Sync Properties"}
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSyncData}
-            disabled={syncing}
-          >
-            <RefreshCw
-              className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`}
-            />
+          <Button variant="outline" size="sm" onClick={handleSyncData} disabled={syncing}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
             {syncing ? "Syncing..." : "Sync Data"}
           </Button>
 
@@ -388,204 +445,433 @@ export default function GscPage() {
         </div>
       </div>
 
-      {/* Global Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Clicks ({periodLabel[days]})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {totalClicks.toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Impressions ({periodLabel[days]})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {totalImpressions.toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Properties
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{properties.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Top Queries
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{topQueries.length}</div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="overview">Vue d&apos;ensemble</TabsTrigger>
+          <TabsTrigger value="drops">
+            <TrendingDown className="h-3.5 w-3.5 mr-1" />
+            Baisses
+          </TabsTrigger>
+          <TabsTrigger value="opportunities">
+            <Lightbulb className="h-3.5 w-3.5 mr-1" />
+            Opportunites
+          </TabsTrigger>
+          <TabsTrigger value="keywords">
+            <Target className="h-3.5 w-3.5 mr-1" />
+            Top Keywords
+          </TabsTrigger>
+          <TabsTrigger value="power">
+            <Flame className="h-3.5 w-3.5 mr-1" />
+            Power Score
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Properties Grid */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            Properties
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {properties.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <p>No GSC properties found.</p>
-              <p className="text-sm mt-1">
-                Click &quot;Sync Properties&quot; to discover your sites.
-              </p>
-              <p className="text-xs mt-2">
-                Make sure to add the service account as a user on your GSC
-                properties first.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {properties.map((prop) => (
-                <Card key={prop.id} className="border">
-                  <CardContent className="pt-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="font-medium text-sm truncate flex-1">
-                        {extractDomain(prop.site_url)}
-                      </div>
-                      {prop.sites ? (
-                        <Badge variant="default" className="ml-2 text-xs">
-                          Linked
-                        </Badge>
-                      ) : (
-                        <Select
-                          onValueChange={(val) =>
-                            handleLinkProperty(prop.id, val)
-                          }
-                        >
-                          <SelectTrigger className="w-[120px] h-7 text-xs">
-                            <SelectValue placeholder="Link site" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {userSites.map((s) => (
-                              <SelectItem key={s.id} value={s.id}>
-                                {s.domain}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                    <div className="flex gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <MousePointerClick className="h-3 w-3" />
-                        {prop.stats_7d.clicks.toLocaleString()} clicks
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Eye className="h-3 w-3" />
-                        {prop.stats_7d.impressions.toLocaleString()} imp
-                      </div>
-                    </div>
-                    {prop.last_synced_at && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Last sync:{" "}
-                        {new Date(prop.last_synced_at).toLocaleDateString()}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {/* ── Overview Tab ─────────────────────────────────────────────── */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Clicks ({periodLabel[days]})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{totalClicks.toLocaleString()}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Impressions ({periodLabel[days]})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{totalImpressions.toLocaleString()}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Properties</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{properties.length}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Top Queries</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{topQueries.length}</div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Top Keywords */}
-      <Card>
-        <CardHeader>
+          {/* Properties Grid */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Globe className="h-5 w-5" />
+                Properties
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {properties.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No GSC properties found.</p>
+                  <p className="text-sm mt-1">Click &quot;Sync Properties&quot; to discover your sites.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {properties.map((prop) => (
+                    <Card key={prop.id} className="border">
+                      <CardContent className="pt-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="font-medium text-sm truncate flex-1">
+                            {extractDomain(prop.site_url)}
+                          </div>
+                          {prop.sites ? (
+                            <Badge variant="default" className="ml-2 text-xs">Linked</Badge>
+                          ) : (
+                            <Select onValueChange={(val) => handleLinkProperty(prop.id, val)}>
+                              <SelectTrigger className="w-[120px] h-7 text-xs">
+                                <SelectValue placeholder="Link site" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {userSites.map((s) => (
+                                  <SelectItem key={s.id} value={s.id}>{s.domain}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                        <div className="flex gap-4 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <MousePointerClick className="h-3 w-3" />
+                            {prop.stats_7d.clicks.toLocaleString()} clicks
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Eye className="h-3 w-3" />
+                            {prop.stats_7d.impressions.toLocaleString()} imp
+                          </div>
+                        </div>
+                        {prop.last_synced_at && (
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Last sync: {new Date(prop.last_synced_at).toLocaleDateString()}
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Traffic Drops Tab ─────────────────────────────────────── */}
+        <TabsContent value="drops" className="space-y-4">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5" />
-              Top Keywords
-            </CardTitle>
-            <Select value={filterCountry} onValueChange={setFilterCountry}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All countries" />
+            <div>
+              <h2 className="text-lg font-semibold">Baisses de trafic</h2>
+              <p className="text-sm text-muted-foreground">
+                Pages avec une baisse de clicks significative entre 2 periodes
+              </p>
+            </div>
+            <Select value={dropDays} onValueChange={setDropDays}>
+              <SelectTrigger className="w-[130px]">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All countries</SelectItem>
-                {countries.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {getFlag(c)} {c}
-                  </SelectItem>
-                ))}
+                <SelectItem value="7">7j vs 7j</SelectItem>
+                <SelectItem value="14">14j vs 14j</SelectItem>
+                <SelectItem value="28">28j vs 28j</SelectItem>
               </SelectContent>
             </Select>
           </div>
-        </CardHeader>
-        <CardContent>
-          {filteredQueries.length === 0 ? (
-            <p className="text-center text-muted-foreground py-4">
-              No data yet. Sync your properties first.
-            </p>
+
+          {trafficDrops.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Aucune baisse significative detectee
+              </CardContent>
+            </Card>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Query</TableHead>
-                  <TableHead>Property</TableHead>
-                  <TableHead>Country</TableHead>
-                  <TableHead className="text-right">Clicks</TableHead>
-                  <TableHead className="text-right">Impressions</TableHead>
-                  <TableHead className="text-right">Position</TableHead>
-                  <TableHead className="text-right">CTR</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredQueries.map((q, i) => (
-                  <TableRow key={`${q.query}-${q.country}-${i}`}>
-                    <TableCell className="font-medium max-w-[250px] truncate">
-                      {q.query}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate">
-                      {extractDomain(q.property_site_url)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {getFlag(q.country)} {q.country}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {q.total_clicks.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {q.total_impressions.toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {q.avg_position.toFixed(1)}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {(q.avg_ctr * 100).toFixed(1)}%
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <Card>
+              <CardContent className="pt-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Page</TableHead>
+                      <TableHead className="text-right">Avant</TableHead>
+                      <TableHead className="text-right">Apres</TableHead>
+                      <TableHead className="text-right">Variation</TableHead>
+                      <TableHead>Top Queries</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {trafficDrops.map((drop, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="max-w-[300px]">
+                          <div className="truncate text-sm font-medium">{drop.page}</div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {extractDomain(drop.property_site_url)}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">{drop.clicks_before}</TableCell>
+                        <TableCell className="text-right">{drop.clicks_after}</TableCell>
+                        <TableCell className="text-right">
+                          <Badge
+                            variant={drop.pct_change < -50 ? "destructive" : "secondary"}
+                            className={drop.pct_change < -50 ? "" : "text-orange-600"}
+                          >
+                            {drop.pct_change}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {drop.top_queries.slice(0, 3).map((q) => (
+                              <Badge key={q.query} variant="outline" className="text-xs">
+                                {q.query}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
+
+        {/* ── Opportunities Tab ────────────────────────────────────── */}
+        <TabsContent value="opportunities" className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Opportunites</h2>
+            <p className="text-sm text-muted-foreground">
+              Mots-cles avec beaucoup d&apos;impressions mais une position ameliorable ({">"} 5)
+            </p>
+          </div>
+
+          {opportunities.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Aucune opportunite trouvee
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="pt-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Query</TableHead>
+                      <TableHead>Pays</TableHead>
+                      <TableHead className="text-right">Impressions</TableHead>
+                      <TableHead className="text-right">Position</TableHead>
+                      <TableHead className="text-right">Clicks</TableHead>
+                      <TableHead className="text-right">CTR</TableHead>
+                      <TableHead>Page</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {opportunities.map((opp, i) => (
+                      <TableRow
+                        key={i}
+                        className={
+                          opp.avg_position >= 5 && opp.avg_position <= 15
+                            ? "bg-green-50 dark:bg-green-950/20"
+                            : ""
+                        }
+                      >
+                        <TableCell className="font-medium max-w-[200px] truncate">
+                          {opp.query}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {getFlag(opp.country)} {opp.country}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {opp.impressions.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span
+                            className={
+                              opp.avg_position <= 10
+                                ? "text-green-600 font-bold"
+                                : opp.avg_position <= 20
+                                  ? "text-blue-600"
+                                  : "text-orange-600"
+                            }
+                          >
+                            {opp.avg_position}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">{opp.clicks}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {(opp.avg_ctr * 100).toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
+                          {opp.top_page ?? "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── Top Keywords Tab ─────────────────────────────────────── */}
+        <TabsContent value="keywords" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  Top Keywords
+                </CardTitle>
+                <Select value={filterCountry} onValueChange={setFilterCountry}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="All countries" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All countries</SelectItem>
+                    {countries.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {getFlag(c)} {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {filteredQueries.length === 0 ? (
+                <p className="text-center text-muted-foreground py-4">
+                  No data yet. Sync your properties first.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Query</TableHead>
+                      <TableHead>Property</TableHead>
+                      <TableHead>Country</TableHead>
+                      <TableHead className="text-right">Clicks</TableHead>
+                      <TableHead className="text-right">Impressions</TableHead>
+                      <TableHead className="text-right">Position</TableHead>
+                      <TableHead className="text-right">CTR</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredQueries.map((q, i) => (
+                      <TableRow key={`${q.query}-${q.country}-${i}`}>
+                        <TableCell className="font-medium max-w-[250px] truncate">
+                          {q.query}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate">
+                          {extractDomain(q.property_site_url)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {getFlag(q.country)} {q.country}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {q.total_clicks.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {q.total_impressions.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">{q.avg_position.toFixed(1)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {(q.avg_ctr * 100).toFixed(1)}%
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Power Score Tab ──────────────────────────────────────── */}
+        <TabsContent value="power" className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Power Score</h2>
+            <p className="text-sm text-muted-foreground">
+              Plus la position est basse et les impressions fortes, plus le mot-cle a de potentiel.
+              Formule : impressions / ln(position + 1)
+            </p>
+          </div>
+
+          {powerScores.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Aucun mot-cle avec Power Score trouve
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="pt-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Query</TableHead>
+                      <TableHead>Pays</TableHead>
+                      <TableHead className="text-right">Power Score</TableHead>
+                      <TableHead className="text-right">Impressions</TableHead>
+                      <TableHead className="text-right">Position</TableHead>
+                      <TableHead className="text-right">Clicks actuels</TableHead>
+                      <TableHead className="text-right">Est. trafic Top 3</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {powerScores.map((ps, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-medium max-w-[200px] truncate">
+                          {ps.query}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {getFlag(ps.country)} {ps.country}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="font-bold text-lg text-primary">
+                            {ps.power_score.toLocaleString()}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {ps.impressions.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="text-orange-600">{ps.avg_position}</span>
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {ps.clicks.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className="text-green-600 font-medium">
+                            ~{ps.estimated_traffic_top3.toLocaleString()}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

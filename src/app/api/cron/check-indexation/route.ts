@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSitemapUrls } from "@/lib/sitemap/parser";
-import { extractSlugFromUrl, slugToKeyword } from "@/lib/sitemap/slug";
-import { DataForSeoClient } from "@/lib/dataforseo/client";
 import { gscClient } from "@/lib/google/search-console";
 import { RapidIndexerService } from "@/lib/indexer/rapid-indexer";
 
 export const maxDuration = 300; // 5 minutes
 
 export async function GET(request: Request) {
-  // Verify cron secret
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -17,24 +14,31 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Get all active sites
+  // Get all active sites with their GSC properties
   const { data: sites } = await supabase
     .from("sites")
-    .select("id, domain, location_code, locations(default_language)")
+    .select("id, domain, gsc_properties(id)")
     .eq("is_active", true);
 
   if (!sites || sites.length === 0) {
     return NextResponse.json({ message: "No active sites" });
   }
 
-  const dataforseo = new DataForSeoClient();
-  let totalApiCalls = 0;
   let totalIndexed = 0;
   let totalNotIndexed = 0;
   const notIndexedUrls: Array<{ siteId: string; url: string }> = [];
 
   for (const site of sites) {
     try {
+      // Get linked GSC property
+      const gscProps = site.gsc_properties as unknown as Array<{ id: string }> | null;
+      const gscPropertyId = gscProps?.[0]?.id;
+
+      if (!gscPropertyId) {
+        console.log(`[CRON-INDEX] No GSC property linked for ${site.domain}, skipping`);
+        continue;
+      }
+
       // Discover sitemap URLs
       const urls = await discoverSitemapUrls(site.domain);
       if (urls.length === 0) continue;
@@ -55,47 +59,52 @@ export async function GET(request: Request) {
           });
       }
 
-      const loc = site.locations as unknown as { default_language: string } | null;
-      const locationCode = site.location_code ?? 2840;
-      const language = loc?.default_language ?? "en";
+      // Get pages that appear in GSC (last 30 days = indexed)
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 30);
+      const dateStr = sinceDate.toISOString().split("T")[0];
 
-      // Check each URL via DataForSEO site: query
+      const { data: gscPages } = await supabase
+        .from("gsc_search_data")
+        .select("page")
+        .eq("gsc_property_id", gscPropertyId)
+        .gte("date", dateStr)
+        .gt("impressions", 0)
+        .not("page", "is", null);
+
+      const indexedPages = new Set(
+        (gscPages ?? []).filter((p: { page: string | null }) => p.page !== null).map((p: { page: string | null }) => p.page as string)
+      );
+
+      const now = new Date().toISOString();
+
+      // Cross-reference sitemap URLs with GSC pages
       for (const url of urls) {
-        const slug = extractSlugFromUrl(url);
-        if (!slug) continue;
+        const isIndexed = indexedPages.has(url);
 
-        const keyword = slugToKeyword(slug);
+        if (isIndexed) {
+          totalIndexed++;
+          await supabase
+            .from("site_pages")
+            .update({
+              index_status: "indexed",
+              last_checked_at: now,
+              indexed_at: now,
+            })
+            .eq("site_id", site.id)
+            .eq("url", url);
+        } else {
+          totalNotIndexed++;
+          await supabase
+            .from("site_pages")
+            .update({
+              index_status: "not_indexed",
+              last_checked_at: now,
+            })
+            .eq("site_id", site.id)
+            .eq("url", url);
 
-        try {
-          const result = await dataforseo.checkIndexation(
-            site.domain,
-            keyword,
-            slug,
-            locationCode,
-            language,
-          );
-          totalApiCalls++;
-
-          const now = new Date().toISOString();
-          if (result.indexed) {
-            totalIndexed++;
-            await supabase
-              .from("site_pages")
-              .update({ index_status: "indexed", last_checked_at: now })
-              .eq("site_id", site.id)
-              .eq("url", url);
-          } else {
-            totalNotIndexed++;
-            await supabase
-              .from("site_pages")
-              .update({ index_status: "not_indexed", last_checked_at: now })
-              .eq("site_id", site.id)
-              .eq("url", url);
-
-            notIndexedUrls.push({ siteId: site.id, url });
-          }
-        } catch (err) {
-          console.error(`[CRON-INDEX] Error checking ${url}:`, err);
+          notIndexedUrls.push({ siteId: site.id, url });
         }
       }
     } catch (err) {
@@ -136,39 +145,25 @@ export async function GET(request: Request) {
     }
 
     // Update status for all not-indexed URLs
+    const now = new Date().toISOString();
     for (const entry of notIndexedUrls) {
       await supabase
         .from("site_pages")
-        .update({ index_status: "reindex_submitted" })
+        .update({
+          index_status: "reindex_submitted",
+          submitted_at: now,
+        })
         .eq("site_id", entry.siteId)
         .eq("url", entry.url);
     }
   }
 
-  // Log API usage
-  if (totalApiCalls > 0) {
-    const { data: anySite } = await supabase
-      .from("sites")
-      .select("user_id")
-      .limit(1)
-      .single();
-
-    if (anySite?.user_id) {
-      await supabase.from("api_usage_log").insert({
-        user_id: anySite.user_id,
-        service: "dataforseo",
-        endpoint: "serp/google/organic/live (cron index check)",
-        credits_used: totalApiCalls,
-        cost_usd: totalApiCalls * 0.002,
-      });
-    }
-  }
-
-  console.log(`[CRON-INDEX] Complete: ${sites.length} sites, ${totalApiCalls} API calls, ${totalIndexed} indexed, ${totalNotIndexed} not indexed`);
+  console.log(
+    `[CRON-INDEX] Complete: ${sites.length} sites, ${totalIndexed} indexed, ${totalNotIndexed} not indexed (GSC-based, $0 cost)`
+  );
 
   return NextResponse.json({
     sites: sites.length,
-    apiCalls: totalApiCalls,
     indexed: totalIndexed,
     notIndexed: totalNotIndexed,
     googleReindexed,

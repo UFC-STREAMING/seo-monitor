@@ -32,19 +32,6 @@ export type ApiService = "dataforseo" | "rapid_indexer" | "brave" | "gsc" | "goo
 // JSON column types
 // ---------------------------------------------------------------------------
 
-export interface SerpFeatures {
-  featured_snippet?: boolean;
-  local_pack?: boolean;
-  people_also_ask?: boolean;
-  knowledge_panel?: boolean;
-  top_stories?: boolean;
-  image_pack?: boolean;
-  video?: boolean;
-  sitelinks?: boolean;
-  shopping?: boolean;
-  [key: string]: boolean | undefined;
-}
-
 export interface IndexerTaskResults {
   submitted?: number;
   indexed?: number;
@@ -165,52 +152,6 @@ export interface Database {
             isOneToOne: false;
             referencedRelation: "locations";
             referencedColumns: ["code"];
-          },
-        ];
-      };
-
-      keyword_positions: {
-        Row: {
-          id: string;
-          keyword_id: string;
-          site_id: string;
-          position: number | null;
-          url_found: string | null;
-          serp_features: SerpFeatures | null;
-          checked_at: string;
-        };
-        Insert: {
-          id?: string;
-          keyword_id: string;
-          site_id: string;
-          position?: number | null;
-          url_found?: string | null;
-          serp_features?: SerpFeatures | null;
-          checked_at?: string;
-        };
-        Update: {
-          id?: string;
-          keyword_id?: string;
-          site_id?: string;
-          position?: number | null;
-          url_found?: string | null;
-          serp_features?: SerpFeatures | null;
-          checked_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: "keyword_positions_keyword_id_fkey";
-            columns: ["keyword_id"];
-            isOneToOne: false;
-            referencedRelation: "keywords";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "keyword_positions_site_id_fkey";
-            columns: ["site_id"];
-            isOneToOne: false;
-            referencedRelation: "sites";
-            referencedColumns: ["id"];
           },
         ];
       };
@@ -487,6 +428,9 @@ export interface Database {
           index_status: string;
           last_checked_at: string | null;
           checker_task_id: string | null;
+          product_name: string | null;
+          submitted_at: string | null;
+          indexed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -498,6 +442,9 @@ export interface Database {
           index_status?: string;
           last_checked_at?: string | null;
           checker_task_id?: string | null;
+          product_name?: string | null;
+          submitted_at?: string | null;
+          indexed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -509,6 +456,9 @@ export interface Database {
           index_status?: string;
           last_checked_at?: string | null;
           checker_task_id?: string | null;
+          product_name?: string | null;
+          submitted_at?: string | null;
+          indexed_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -741,7 +691,6 @@ export type Enums = Database["public"]["Enums"];
 export type Site = Tables["sites"]["Row"];
 export type Location = Tables["locations"]["Row"];
 export type Keyword = Tables["keywords"]["Row"];
-export type KeywordPosition = Tables["keyword_positions"]["Row"];
 export type DeindexedUrl = Tables["deindexed_urls"]["Row"];
 export type TechnicalAudit = Tables["technical_audits"]["Row"];
 export type SiteLink = Tables["site_links"]["Row"];
@@ -761,7 +710,6 @@ export type GscAutoRule = Tables["gsc_auto_rules"]["Row"];
 
 export type SiteInsert = Tables["sites"]["Insert"];
 export type KeywordInsert = Tables["keywords"]["Insert"];
-export type KeywordPositionInsert = Tables["keyword_positions"]["Insert"];
 export type DeindexedUrlInsert = Tables["deindexed_urls"]["Insert"];
 export type TechnicalAuditInsert = Tables["technical_audits"]["Insert"];
 export type SiteLinkInsert = Tables["site_links"]["Insert"];
@@ -780,7 +728,6 @@ export type GscAutoRuleInsert = Tables["gsc_auto_rules"]["Insert"];
 
 export type SiteUpdate = Tables["sites"]["Update"];
 export type KeywordUpdate = Tables["keywords"]["Update"];
-export type KeywordPositionUpdate = Tables["keyword_positions"]["Update"];
 export type DeindexedUrlUpdate = Tables["deindexed_urls"]["Update"];
 export type AlertUpdate = Tables["alerts"]["Update"];
 export type AlertRuleUpdate = Tables["alert_rules"]["Update"];
@@ -792,11 +739,6 @@ export type IndexerTaskUpdate = Tables["indexer_tasks"]["Update"];
 
 export type SiteWithKeywords = Site & {
   keywords: Keyword[];
-};
-
-export type KeywordWithPosition = Keyword & {
-  latest_position: KeywordPosition | null;
-  location: Location;
 };
 
 export type SiteWithStats = Site & {

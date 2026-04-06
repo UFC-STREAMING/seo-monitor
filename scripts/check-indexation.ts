@@ -1,25 +1,23 @@
 // ---------------------------------------------------------------------------
-// Standalone script: Check URL indexation via DataForSEO + auto-reindex
+// Standalone script: Check URL indexation via GSC data + auto-reindex
 // Run: npx tsx --env-file=.env scripts/check-indexation.ts
 // ---------------------------------------------------------------------------
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { discoverSitemapUrls } from "@/lib/sitemap/parser";
-import { extractSlugFromUrl, slugToKeyword } from "@/lib/sitemap/slug";
-import { DataForSeoClient } from "@/lib/dataforseo/client";
 import { gscClient } from "@/lib/google/search-console";
 import { RapidIndexerService } from "@/lib/indexer/rapid-indexer";
 
 async function main() {
-  console.log("[CHECK-INDEXATION] Starting...");
+  console.log("[CHECK-INDEXATION] Starting (GSC-based)...");
   const startTime = Date.now();
 
   const supabase = createAdminClient();
 
-  // Get all active sites
+  // Get all active sites with GSC properties
   const { data: sites } = await supabase
     .from("sites")
-    .select("id, domain, user_id, location_code, locations(default_language)")
+    .select("id, domain, user_id, gsc_properties(id)")
     .eq("is_active", true);
 
   if (!sites || sites.length === 0) {
@@ -29,14 +27,21 @@ async function main() {
 
   console.log(`[CHECK-INDEXATION] Processing ${sites.length} sites...`);
 
-  const dataforseo = new DataForSeoClient();
-  let totalApiCalls = 0;
   let totalIndexed = 0;
   let totalNotIndexed = 0;
   const notIndexedUrls: Array<{ siteId: string; url: string }> = [];
 
   for (const site of sites) {
     try {
+      // Get linked GSC property
+      const gscProps = site.gsc_properties as unknown as Array<{ id: string }> | null;
+      const gscPropertyId = gscProps?.[0]?.id;
+
+      if (!gscPropertyId) {
+        console.log(`[CHECK-INDEXATION] ${site.domain}: no GSC property, skipping`);
+        continue;
+      }
+
       // Discover sitemap URLs
       const urls = await discoverSitemapUrls(site.domain);
       if (urls.length === 0) {
@@ -44,43 +49,7 @@ async function main() {
         continue;
       }
 
-      // Get URLs already covered by tracked keywords (check-positions handles those)
-      const { data: kwPositions } = await supabase
-        .from("keyword_positions")
-        .select("url_found")
-        .eq("site_id", site.id)
-        .not("url_found", "is", null);
-
-      const coveredUrls = new Set(
-        (kwPositions ?? []).map((p) => p.url_found).filter(Boolean)
-      );
-
-      // Also match by keyword slug → URL slug
-      const { data: siteKeywords } = await supabase
-        .from("keywords")
-        .select("keyword")
-        .eq("site_id", site.id);
-
-      const kwSlugs = new Set(
-        (siteKeywords ?? []).map((k) =>
-          k.keyword.toLowerCase().replace(/\s+/g, "-")
-        )
-      );
-
-      const filteredUrls = urls.filter((url) => {
-        // Skip if already checked via check-positions
-        if (coveredUrls.has(url)) return false;
-        // Skip if URL slug matches a tracked keyword
-        const slug = extractSlugFromUrl(url).toLowerCase();
-        if (slug && kwSlugs.has(slug)) return false;
-        return true;
-      });
-
-      console.log(
-        `[CHECK-INDEXATION] ${site.domain}: ${urls.length} sitemap URLs, ${urls.length - filteredUrls.length} covered by keywords, ${filteredUrls.length} to check`
-      );
-
-      // Upsert ALL sitemap URLs into site_pages (for reference)
+      // Upsert into site_pages
       const toUpsert = urls.map((url) => ({
         site_id: site.id,
         url,
@@ -96,99 +65,74 @@ async function main() {
           });
       }
 
-      const loc = site.locations as unknown as {
-        default_language: string;
-      } | null;
-      const locationCode = site.location_code ?? 2840;
-      const language = loc?.default_language ?? "en";
+      // Get pages that appear in GSC (last 30 days = indexed)
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 30);
+      const dateStr = sinceDate.toISOString().split("T")[0];
 
-      // Check only non-keyword-covered URLs via DataForSEO
-      let siteChecked = 0;
-      for (const url of filteredUrls) {
-        const slug = extractSlugFromUrl(url);
-        if (!slug) continue;
+      const { data: gscPages } = await supabase
+        .from("gsc_search_data")
+        .select("page")
+        .eq("gsc_property_id", gscPropertyId)
+        .gte("date", dateStr)
+        .gt("impressions", 0)
+        .not("page", "is", null);
 
-        const keyword = slugToKeyword(slug);
+      const indexedPages = new Set(
+        (gscPages ?? []).filter((p: { page: string | null }) => p.page !== null).map((p: { page: string | null }) => p.page as string)
+      );
 
-        try {
-          const result = await dataforseo.checkIndexation(
-            site.domain,
-            keyword,
-            slug,
-            locationCode,
-            language
-          );
-          totalApiCalls++;
-          siteChecked++;
+      const now = new Date().toISOString();
+      let siteIndexed = 0;
+      let siteNotIndexed = 0;
 
-          const now = new Date().toISOString();
-          if (result.indexed) {
-            totalIndexed++;
-            await supabase
-              .from("site_pages")
-              .update({ index_status: "indexed", last_checked_at: now })
-              .eq("site_id", site.id)
-              .eq("url", url);
-          } else {
-            totalNotIndexed++;
-            await supabase
-              .from("site_pages")
-              .update({ index_status: "not_indexed", last_checked_at: now })
-              .eq("site_id", site.id)
-              .eq("url", url);
+      for (const url of urls) {
+        if (indexedPages.has(url)) {
+          siteIndexed++;
+          totalIndexed++;
+          await supabase
+            .from("site_pages")
+            .update({ index_status: "indexed", last_checked_at: now, indexed_at: now })
+            .eq("site_id", site.id)
+            .eq("url", url);
+        } else {
+          siteNotIndexed++;
+          totalNotIndexed++;
+          await supabase
+            .from("site_pages")
+            .update({ index_status: "not_indexed", last_checked_at: now })
+            .eq("site_id", site.id)
+            .eq("url", url);
 
-            notIndexedUrls.push({ siteId: site.id, url });
-          }
-
-          // Progress log every 20 URLs
-          if (siteChecked % 20 === 0) {
-            console.log(
-              `[CHECK-INDEXATION] ${site.domain}: ${siteChecked}/${urls.length} checked`
-            );
-          }
-        } catch (err) {
-          console.error(`[CHECK-INDEXATION] Error checking ${url}:`, err);
+          notIndexedUrls.push({ siteId: site.id, url });
         }
       }
 
       console.log(
-        `[CHECK-INDEXATION] ${site.domain}: done (${siteChecked} checked)`
+        `[CHECK-INDEXATION] ${site.domain}: ${urls.length} URLs, ${siteIndexed} indexed, ${siteNotIndexed} not indexed`
       );
     } catch (err) {
-      console.error(
-        `[CHECK-INDEXATION] Error processing site ${site.domain}:`,
-        err
-      );
+      console.error(`[CHECK-INDEXATION] Error processing site ${site.domain}:`, err);
     }
   }
 
-  // Auto-submit not-indexed URLs via Google Indexing API + Rapid Indexer
+  // Auto-submit not-indexed URLs
   let googleReindexed = 0;
   let rapidReindexed = 0;
 
   if (notIndexedUrls.length > 0) {
     const urls = [...new Set(notIndexedUrls.map((n) => n.url))];
-    console.log(
-      `[CHECK-INDEXATION] ${urls.length} unique not-indexed URLs to reindex`
-    );
+    console.log(`[CHECK-INDEXATION] ${urls.length} unique not-indexed URLs to reindex`);
 
-    // 1. Google Indexing API (limit 200/day)
+    // Google Indexing API (limit 200/day)
     if (gscClient.isConfigured()) {
       const batch = urls.slice(0, 200);
-      console.log(
-        `[CHECK-INDEXATION] Submitting ${batch.length} URLs to Google Indexing API...`
-      );
+      console.log(`[CHECK-INDEXATION] Submitting ${batch.length} URLs to Google Indexing API...`);
       const result = await gscClient.notifyUrlUpdateBatch(batch);
       googleReindexed = result.submitted;
-      if (result.errors.length > 0) {
-        console.error(
-          "[CHECK-INDEXATION] Google Indexing errors:",
-          result.errors
-        );
-      }
     }
 
-    // 2. Rapid Indexer (all URLs, no daily limit)
+    // Rapid Indexer
     try {
       const rapidIndexer = new RapidIndexerService();
       const { taskId } = await rapidIndexer.submitUrls(urls);
@@ -200,40 +144,25 @@ async function main() {
         status: "pending",
       });
 
-      console.log(
-        `[CHECK-INDEXATION] Submitted ${urls.length} URLs to Rapid Indexer (task ${taskId})`
-      );
+      console.log(`[CHECK-INDEXATION] Submitted ${urls.length} URLs to Rapid Indexer (task ${taskId})`);
     } catch (err) {
       console.error("[CHECK-INDEXATION] Rapid Indexer error:", err);
     }
 
-    // Update status for all not-indexed URLs
+    // Update status
+    const now = new Date().toISOString();
     for (const entry of notIndexedUrls) {
       await supabase
         .from("site_pages")
-        .update({ index_status: "reindex_submitted" })
+        .update({ index_status: "reindex_submitted", submitted_at: now })
         .eq("site_id", entry.siteId)
         .eq("url", entry.url);
     }
   }
 
-  // Log API usage
-  if (totalApiCalls > 0) {
-    const userId = sites[0]?.user_id;
-    if (userId) {
-      await supabase.from("api_usage_log").insert({
-        user_id: userId,
-        service: "dataforseo",
-        endpoint: "serp/google/organic/live (check indexation)",
-        credits_used: totalApiCalls,
-        cost_usd: totalApiCalls * 0.002,
-      });
-    }
-  }
-
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log(
-    `[CHECK-INDEXATION] Complete in ${elapsed}s: ${sites.length} sites, ${totalApiCalls} API calls, ${totalIndexed} indexed, ${totalNotIndexed} not indexed, ${googleReindexed} Google reindexed, ${rapidReindexed} Rapid reindexed`
+    `[CHECK-INDEXATION] Complete in ${elapsed}s: ${sites.length} sites, ${totalIndexed} indexed, ${totalNotIndexed} not indexed, ${googleReindexed} Google reindexed, ${rapidReindexed} Rapid reindexed ($0 API cost)`
   );
 
   process.exit(0);

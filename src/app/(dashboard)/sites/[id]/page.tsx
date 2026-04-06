@@ -18,9 +18,6 @@ import {
   Shield,
   Server,
   Activity,
-  ArrowUp,
-  ArrowDown,
-  Minus,
   ArrowLeft,
   RefreshCw,
   Clock,
@@ -29,11 +26,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { AddKeywordDialog } from "@/components/sites/add-keyword-dialog";
-import { CheckPositionsButton } from "@/components/sites/check-positions-button";
 import type {
-  Site,
   Keyword,
-  KeywordPosition,
   DeindexedUrl,
   TechnicalAudit,
   Location,
@@ -41,15 +35,6 @@ import type {
 
 interface KeywordWithDetails extends Keyword {
   locations: Location;
-  latest_position: KeywordPosition | null;
-  previous_position: KeywordPosition | null;
-}
-
-function getTrend(latest: number | null, previous: number | null) {
-  if (latest === null || previous === null) return null;
-  if (latest < previous) return "up";
-  if (latest > previous) return "down";
-  return "stable";
 }
 
 function getHealthScore(audit: TechnicalAudit | null): number {
@@ -94,39 +79,11 @@ export default async function SiteDetailPage({
     .eq("site_id", id)
     .order("keyword");
 
-  // Fetch latest positions for all keywords
-  const keywordIds = (keywords ?? []).map((k) => k.id);
-  const { data: positions } = await supabase
-    .from("keyword_positions")
-    .select("*")
-    .eq("site_id", id)
-    .in("keyword_id", keywordIds.length > 0 ? keywordIds : ["none"])
-    .order("checked_at", { ascending: false });
-
-  // Build position map (latest + previous for each keyword)
-  const posMap = new Map<
-    string,
-    { latest: KeywordPosition | null; previous: KeywordPosition | null }
-  >();
-  positions?.forEach((p) => {
-    const existing = posMap.get(p.keyword_id);
-    if (!existing) {
-      posMap.set(p.keyword_id, { latest: p, previous: null });
-    } else if (existing.previous === null) {
-      existing.previous = p;
-    }
-  });
-
   const keywordsWithDetails: KeywordWithDetails[] = (keywords ?? []).map(
-    (k) => {
-      const pos = posMap.get(k.id);
-      return {
-        ...k,
-        locations: k.locations as unknown as Location,
-        latest_position: pos?.latest ?? null,
-        previous_position: pos?.previous ?? null,
-      };
-    }
+    (k) => ({
+      ...k,
+      locations: k.locations as unknown as Location,
+    })
   );
 
   // Fetch deindexed URLs
@@ -334,10 +291,7 @@ export default async function SiteDetailPage({
             <h2 className="text-xl font-semibold">
               Keywords ({keywordsWithDetails.length})
             </h2>
-            <div className="flex items-center gap-2">
-              <CheckPositionsButton siteId={id} />
-              <AddKeywordDialog siteId={id} />
-            </div>
+            <AddKeywordDialog siteId={id} />
           </div>
 
           {keywordsWithDetails.length > 0 ? (
@@ -347,76 +301,22 @@ export default async function SiteDetailPage({
                   <TableRow>
                     <TableHead>Keyword</TableHead>
                     <TableHead>Country</TableHead>
-                    <TableHead className="text-center">Position</TableHead>
-                    <TableHead>URL Found</TableHead>
-                    <TableHead className="text-center">Trend</TableHead>
-                    <TableHead className="text-center">Last Checked</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {keywordsWithDetails.map((kw) => {
-                    const trend = getTrend(
-                      kw.latest_position?.position ?? null,
-                      kw.previous_position?.position ?? null
-                    );
-
-                    return (
-                      <TableRow key={kw.id}>
-                        <TableCell className="font-medium">
-                          {kw.keyword}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {kw.locations?.country_iso ?? "?"}{" "}
-                            {kw.locations?.name ?? "Unknown"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {kw.latest_position?.position != null ? (
-                            <span
-                              className={
-                                kw.latest_position.position <= 3
-                                  ? "font-bold text-green-600"
-                                  : kw.latest_position.position <= 10
-                                    ? "font-bold text-emerald-600"
-                                    : kw.latest_position.position <= 20
-                                      ? "text-blue-600"
-                                      : ""
-                              }
-                            >
-                              {kw.latest_position.position}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                          {kw.latest_position?.url_found ?? "-"}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          {trend === "up" && (
-                            <ArrowUp className="mx-auto h-4 w-4 text-green-600" />
-                          )}
-                          {trend === "down" && (
-                            <ArrowDown className="mx-auto h-4 w-4 text-destructive" />
-                          )}
-                          {trend === "stable" && (
-                            <Minus className="mx-auto h-4 w-4 text-muted-foreground" />
-                          )}
-                          {trend === null && (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-center text-xs text-muted-foreground">
-                          {kw.latest_position?.checked_at
-                            ? new Date(
-                                kw.latest_position.checked_at
-                              ).toLocaleDateString()
-                            : "-"}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {keywordsWithDetails.map((kw) => (
+                    <TableRow key={kw.id}>
+                      <TableCell className="font-medium">
+                        {kw.keyword}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {kw.locations?.country_iso ?? "?"}{" "}
+                          {kw.locations?.name ?? "Unknown"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 </TableBody>
               </Table>
             </div>
@@ -424,7 +324,7 @@ export default async function SiteDetailPage({
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
               <p className="mb-2 text-lg font-medium">No keywords yet</p>
               <p className="mb-4 text-sm text-muted-foreground">
-                Start tracking keyword positions for this site
+                Keywords are used for GSC auto-detection
               </p>
               <AddKeywordDialog siteId={id} />
             </div>
