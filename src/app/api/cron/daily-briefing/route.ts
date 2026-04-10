@@ -254,19 +254,45 @@ export async function GET(request: Request) {
   lines.push(`  ${totalImpressions.toLocaleString()} impressions · ${active.length} sites actifs`);
 
   // ─────────────────────────────────────────────────────────────
-  // STEP 5 — Brands HOT (toujours actionnable)
+  // STEP 5 — Brands HOT + Optimisations (via REST direct, hors types)
   // ─────────────────────────────────────────────────────────────
-  const { data: hotBrands, count: hotCount } = await supabase
-    .from("brand_tracking")
-    .select("brand_name, country, impressions_current_week", { count: "exact" })
-    .eq("status", "hot")
-    .order("impressions_current_week", { ascending: false })
-    .limit(3);
+  // brand_tracking et content_optimizations ne sont pas (encore) dans
+  // src/types/database.ts sur main, donc on passe par l'API REST pour
+  // éviter les erreurs de build TypeScript.
+  interface HotBrandRow {
+    brand_name: string;
+    country: string;
+    impressions_current_week: number;
+  }
+  let hotBrands: HotBrandRow[] = [];
+  let hotCount = 0;
+  try {
+    const hbRes = await fetch(
+      `${sbUrl}/rest/v1/brand_tracking?select=brand_name,country,impressions_current_week&status=eq.hot&order=impressions_current_week.desc&limit=3`,
+      {
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          Prefer: "count=exact",
+        },
+      },
+    );
+    if (hbRes.ok) {
+      hotBrands = (await hbRes.json()) as HotBrandRow[];
+      const rangeHeader = hbRes.headers.get("content-range");
+      if (rangeHeader) {
+        const parts = rangeHeader.split("/");
+        hotCount = parts[1] ? Number(parts[1]) : 0;
+      }
+    }
+  } catch {
+    // table absente → skip silencieusement
+  }
 
-  if (hotCount && hotCount > 0) {
+  if (hotCount > 0) {
     lines.push("");
     lines.push(`<b>🔥 Brands HOT (${hotCount})</b>`);
-    for (const b of hotBrands ?? []) {
+    for (const b of hotBrands) {
       lines.push(
         `  • ${b.brand_name} (${b.country}) — ${b.impressions_current_week.toLocaleString()} imp/sem`,
       );
@@ -281,14 +307,33 @@ export async function GET(request: Request) {
     .select("*", { count: "exact", head: true })
     .eq("is_read", false);
 
-  const { count: optPendingCount } = await supabase
-    .from("content_optimizations")
-    .select("*", { count: "exact", head: true })
-    .eq("status", "pending");
+  // content_optimizations : idem, via REST si la table existe
+  let optPendingCount = 0;
+  try {
+    const optRes = await fetch(
+      `${sbUrl}/rest/v1/content_optimizations?select=id&status=eq.pending&limit=1`,
+      {
+        headers: {
+          apikey: sbKey,
+          Authorization: `Bearer ${sbKey}`,
+          Prefer: "count=exact",
+        },
+      },
+    );
+    if (optRes.ok) {
+      const rangeHeader = optRes.headers.get("content-range");
+      if (rangeHeader) {
+        const parts = rangeHeader.split("/");
+        optPendingCount = parts[1] ? Number(parts[1]) : 0;
+      }
+    }
+  } catch {
+    // table absente → skip
+  }
 
   const silent: string[] = [];
   if ((unreadCount ?? 0) > 0) silent.push(`🔔 ${unreadCount} alertes`);
-  if ((optPendingCount ?? 0) > 0) silent.push(`📝 ${optPendingCount} optimisations`);
+  if (optPendingCount > 0) silent.push(`📝 ${optPendingCount} optimisations`);
   if ((archivedCount ?? 0) > 0) silent.push(`🗄️ ${archivedCount} archivées auto`);
 
   if (silent.length > 0) {
