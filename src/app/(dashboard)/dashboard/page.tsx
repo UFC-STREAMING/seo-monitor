@@ -12,6 +12,12 @@ import Link from "next/link";
 export default async function DashboardPage() {
   const supabase = await createClient();
 
+  // Date cutoff: only count alerts from the last 7 days by default.
+  // Old alerts are auto-archived nightly by /api/cron/archive-old-alerts.
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoIso = sevenDaysAgo.toISOString();
+
   const [
     { count: sitesCount },
     { count: alertsCount },
@@ -20,9 +26,19 @@ export default async function DashboardPage() {
     { data: sites },
   ] = await Promise.all([
     supabase.from("sites").select("*", { count: "exact", head: true }).eq("is_active", true),
-    supabase.from("alerts").select("*", { count: "exact", head: true }).eq("is_read", false),
+    // Only unread alerts from the last 7 days — stops the noise from 1000+ stale alerts.
+    supabase
+      .from("alerts")
+      .select("*", { count: "exact", head: true })
+      .eq("is_read", false)
+      .gte("created_at", sevenDaysAgoIso),
     supabase.from("deindexed_urls").select("*").neq("status", "reindexed"),
-    supabase.from("alerts").select("*, sites(domain)").order("created_at", { ascending: false }).limit(10),
+    supabase
+      .from("alerts")
+      .select("*, sites(domain)")
+      .gte("created_at", sevenDaysAgoIso)
+      .order("created_at", { ascending: false })
+      .limit(10),
     supabase.from("sites").select("*, keywords(count), deindexed_urls(count)").eq("is_active", true).order("domain"),
   ]);
 
@@ -58,13 +74,16 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Unread Alerts</CardTitle>
+            <CardTitle className="text-sm font-medium">Alertes récentes (7j)</CardTitle>
             <AlertTriangle className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-500">
               {alertsCount ?? 0}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Non lues, {"<"} 7 jours
+            </p>
           </CardContent>
         </Card>
 
