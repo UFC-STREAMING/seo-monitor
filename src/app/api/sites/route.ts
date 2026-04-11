@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET() {
@@ -47,22 +48,65 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // Two auth paths:
+    //   1. Dashboard user session (Supabase cookie) — normal UI flow
+    //   2. Bearer <CRON_SECRET> with explicit user_id in body — used by
+    //      external services like nutra-factory that push sites here
+    const authHeader = request.headers.get("authorization") ?? "";
+    const isCron =
+      authHeader === `Bearer ${process.env.CRON_SECRET}` &&
+      !!process.env.CRON_SECRET;
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    let userId: string | null = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let supabase: any;
 
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    if (isCron) {
+      // Service-role client (bypasses RLS) for external ingestion.
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !serviceKey) {
+        return NextResponse.json(
+          { error: "SUPABASE_SERVICE_ROLE_KEY not configured" },
+          { status: 500 }
+        );
+      }
+      supabase = createServiceClient(url, serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    } else {
+      supabase = await createClient();
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      userId = user.id;
     }
 
     const body = await request.json();
-    const { domain, niche, site_type, location_code, ip, hosting } = body;
+    const {
+      domain,
+      niche,
+      site_type,
+      location_code,
+      ip,
+      hosting,
+      user_id: bodyUserId,
+    } = body;
+
+    if (isCron) {
+      if (!bodyUserId) {
+        return NextResponse.json(
+          { error: "user_id is required when using Bearer auth" },
+          { status: 400 }
+        );
+      }
+      userId = bodyUserId;
+    }
 
     if (!domain || !niche || !site_type) {
       return NextResponse.json(
@@ -85,14 +129,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Idempotence: if a site already exists for this (user_id, domain),
+    // return it instead of erroring on the UNIQUE constraint. Makes the
+    // nutra-factory push safe to retry.
+    const { data: existing } = await supabase
+      .from("sites")
+      .select("*")
+      .eq("user_id", userId!)
+      .eq("domain", domain.trim())
+      .maybeSingle();
+
+    if (existing) {
+      return NextResponse.json(existing, { status: 200 });
+    }
+
     const { data: site, error } = await supabase
       .from("sites")
       .insert({
-        user_id: user.id,
+        user_id: userId!,
         domain: domain.trim(),
         niche,
         site_type,
-        location_code: location_code || null,
         ip: ip?.trim() || null,
         hosting: hosting?.trim() || null,
       })
@@ -117,7 +174,9 @@ export async function POST(request: NextRequest) {
 
         // Deduplicate by keyword
         const unique = new Map<string, { keyword: string; location_code: number }>();
-        (existingKeywords ?? []).forEach((k) => {
+        const existingKeywordRows =
+          (existingKeywords as Array<{ keyword: string; location_code: number }> | null) ?? [];
+        existingKeywordRows.forEach((k) => {
           if (!unique.has(k.keyword)) {
             unique.set(k.keyword, { keyword: k.keyword, location_code: k.location_code });
           }
