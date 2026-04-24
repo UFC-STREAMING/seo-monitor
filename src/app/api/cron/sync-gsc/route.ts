@@ -32,11 +32,10 @@ export async function GET(request: Request) {
     });
   }
 
-  // Date range: last 5 days (to catch delayed GSC data)
+  // Date range: last 7 days including TODAY (dataState: "all" gives fresh data)
   const endDate = new Date();
-  endDate.setDate(endDate.getDate() - 2);
   const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - 5);
+  startDate.setDate(startDate.getDate() - 7);
 
   const startStr = startDate.toISOString().split("T")[0];
   const endStr = endDate.toISOString().split("T")[0];
@@ -51,7 +50,9 @@ export async function GET(request: Request) {
         prop.site_url,
         startStr,
         endStr,
-        ["date", "query", "page", "country"]
+        ["date", "query", "page", "country"],
+        25000,
+        "all" // fresh data (~4-6h delay) instead of "final" (2-3j delay)
       );
 
       if (rows.length > 0) {

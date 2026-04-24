@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
           prop.site_url,
           startStr,
           endStr,
-          ["date", "query", "page", "country"]
+          ["date", "query", "page", "country"],
+          25000,
+          "all" // fresh data (~4-6h delay)
         );
 
         if (rows.length > 0) {

@@ -176,4 +176,4 @@ CREATE POLICY "Users can manage own gsc_auto_rules"
 -- ---------------------------------------------------------------------------
 ALTER TABLE api_usage_log DROP CONSTRAINT IF EXISTS api_usage_log_service_check;
 ALTER TABLE api_usage_log ADD CONSTRAINT api_usage_log_service_check
-    CHECK (service IN ('dataforseo', 'rapid_indexer', 'brave', 'gsc'));
+    CHECK (service IN ('dataforseo', 'brave', 'gsc'));

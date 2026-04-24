@@ -25,7 +25,6 @@ interface UsageRow {
 
 export default function CostsPage() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [credits, setCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -38,17 +37,6 @@ export default function CostsPage() {
       .limit(100);
 
     setUsage(data ?? []);
-
-    try {
-      const res = await fetch("/api/indexer/credits");
-      if (res.ok) {
-        const d = await res.json();
-        setCredits(d.remaining);
-      }
-    } catch {
-      // ignore
-    }
-
     setLoading(false);
   }, []);
 
@@ -76,8 +64,7 @@ export default function CostsPage() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Costs</h1>
 
-      {/* Summary cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">This Month</CardTitle>
@@ -89,48 +76,29 @@ export default function CostsPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">DataForSEO</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${(byService.get("dataforseo")?.cost ?? 0).toFixed(2)}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {byService.get("dataforseo")?.count ?? 0} requests
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Rapid Indexer</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${(byService.get("rapid_indexer")?.cost ?? 0).toFixed(2)}
-            </div>
-            {credits !== null && (
-              <p className="text-xs text-muted-foreground">
-                {credits} credits remaining
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Brave Search</CardTitle>
+            <CardTitle className="text-sm font-medium">GSC Sync</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">Free</div>
             <p className="text-xs text-muted-foreground">
-              {byService.get("brave")?.count ?? 0} requests
+              {byService.get("gsc")?.count ?? 0} syncs
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">API Calls</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {thisMonth.length}
+            </div>
+            <p className="text-xs text-muted-foreground">this month</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Usage log */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

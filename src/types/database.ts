@@ -16,7 +16,10 @@ export type AlertType =
   | "deindex"
   | "position_drop"
   | "site_down"
-  | "link_broken";
+  | "link_broken"
+  | "brand_hot"
+  | "brand_cooling"
+  | "optimization_needed";
 
 export type Severity = "critical" | "warning" | "info";
 
@@ -26,7 +29,12 @@ export type IndexerTaskStatus =
   | "completed"
   | "failed";
 
-export type ApiService = "dataforseo" | "rapid_indexer" | "brave" | "gsc" | "google_indexing";
+export type ApiService = "dataforseo" | "brave" | "gsc" | "google_indexing";
+
+export type BrandStatus = "hot" | "cooling" | "removed";
+
+export type OptimizationStatus = "pending" | "in_progress" | "completed" | "failed";
+export type OptimizationTrigger = "drop" | "opportunity" | "low_ctr" | "brand_hot" | "manual";
 
 // ---------------------------------------------------------------------------
 // JSON column types
@@ -621,6 +629,133 @@ export interface Database {
         Relationships: [];
       };
 
+      brand_tracking: {
+        Row: {
+          id: string;
+          brand_name: string;
+          nutra_product_id: string | null;
+          country: string;
+          status: BrandStatus;
+          impressions_current_week: number;
+          impressions_previous_week: number;
+          entered_at: string;
+          cooling_since: string | null;
+          dataforseo_position: number | null;
+          dataforseo_last_check: string | null;
+          product_category: string | null;
+          product_countries: string[] | null;
+          product_active: boolean;
+          affiliate_url: string | null;
+          last_enriched_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          brand_name: string;
+          nutra_product_id?: string | null;
+          country: string;
+          status?: BrandStatus;
+          impressions_current_week?: number;
+          impressions_previous_week?: number;
+          entered_at?: string;
+          cooling_since?: string | null;
+          dataforseo_position?: number | null;
+          dataforseo_last_check?: string | null;
+          product_category?: string | null;
+          product_countries?: string[] | null;
+          product_active?: boolean;
+          affiliate_url?: string | null;
+          last_enriched_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          brand_name?: string;
+          nutra_product_id?: string | null;
+          country?: string;
+          status?: BrandStatus;
+          impressions_current_week?: number;
+          impressions_previous_week?: number;
+          entered_at?: string;
+          cooling_since?: string | null;
+          dataforseo_position?: number | null;
+          dataforseo_last_check?: string | null;
+          product_category?: string | null;
+          product_countries?: string[] | null;
+          product_active?: boolean;
+          affiliate_url?: string | null;
+          last_enriched_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+
+      content_optimizations: {
+        Row: {
+          id: string;
+          page_url: string;
+          site_id: string | null;
+          trigger: OptimizationTrigger;
+          status: OptimizationStatus;
+          metrics_before: Record<string, unknown>;
+          metrics_after: Record<string, unknown> | null;
+          changes_made: string | null;
+          agent_name: string | null;
+          brand_name: string | null;
+          requested_at: string;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          page_url: string;
+          site_id?: string | null;
+          trigger: OptimizationTrigger;
+          status?: OptimizationStatus;
+          metrics_before?: Record<string, unknown>;
+          metrics_after?: Record<string, unknown> | null;
+          changes_made?: string | null;
+          agent_name?: string | null;
+          brand_name?: string | null;
+          requested_at?: string;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          page_url?: string;
+          site_id?: string | null;
+          trigger?: OptimizationTrigger;
+          status?: OptimizationStatus;
+          metrics_before?: Record<string, unknown>;
+          metrics_after?: Record<string, unknown> | null;
+          changes_made?: string | null;
+          agent_name?: string | null;
+          brand_name?: string | null;
+          requested_at?: string;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "content_optimizations_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "sites";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+
       api_usage_log: {
         Row: {
           id: string;
@@ -669,6 +804,9 @@ export interface Database {
       severity: Severity;
       indexer_task_status: IndexerTaskStatus;
       api_service: ApiService;
+      brand_status: BrandStatus;
+      optimization_status: OptimizationStatus;
+      optimization_trigger: OptimizationTrigger;
     };
 
     CompositeTypes: {
@@ -703,6 +841,7 @@ export type GscProperty = Tables["gsc_properties"]["Row"];
 export type GscSearchData = Tables["gsc_search_data"]["Row"];
 export type CountryCodeMapping = Tables["country_code_mapping"]["Row"];
 export type GscAutoRule = Tables["gsc_auto_rules"]["Row"];
+export type BrandTracking = Tables["brand_tracking"]["Row"];
 
 // ---------------------------------------------------------------------------
 // Insert Type Aliases
@@ -721,6 +860,11 @@ export type ApiUsageLogInsert = Tables["api_usage_log"]["Insert"];
 export type GscPropertyInsert = Tables["gsc_properties"]["Insert"];
 export type GscSearchDataInsert = Tables["gsc_search_data"]["Insert"];
 export type GscAutoRuleInsert = Tables["gsc_auto_rules"]["Insert"];
+export type BrandTrackingInsert = Tables["brand_tracking"]["Insert"];
+export type BrandTrackingUpdate = Tables["brand_tracking"]["Update"];
+export type ContentOptimization = Tables["content_optimizations"]["Row"];
+export type ContentOptimizationInsert = Tables["content_optimizations"]["Insert"];
+export type ContentOptimizationUpdate = Tables["content_optimizations"]["Update"];
 
 // ---------------------------------------------------------------------------
 // Update Type Aliases

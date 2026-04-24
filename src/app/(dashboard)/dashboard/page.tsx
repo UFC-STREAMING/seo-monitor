@@ -4,16 +4,14 @@ import { Badge } from "@/components/ui/badge";
 import {
   Globe,
   AlertTriangle,
-  FileWarning,
   TrendingUp,
+  BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
 
-  // Date cutoff: only count alerts from the last 7 days by default.
-  // Old alerts are auto-archived nightly by /api/cron/archive-old-alerts.
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const sevenDaysAgoIso = sevenDaysAgo.toISOString();
@@ -21,38 +19,43 @@ export default async function DashboardPage() {
   const [
     { count: sitesCount },
     { count: alertsCount },
-    { data: deindexed },
+    { count: propertiesCount },
     { data: recentAlerts },
     { data: sites },
   ] = await Promise.all([
     supabase.from("sites").select("*", { count: "exact", head: true }).eq("is_active", true),
-    // Only unread alerts from the last 7 days — stops the noise from 1000+ stale alerts.
     supabase
       .from("alerts")
       .select("*", { count: "exact", head: true })
       .eq("is_read", false)
       .gte("created_at", sevenDaysAgoIso),
-    supabase.from("deindexed_urls").select("*").neq("status", "reindexed"),
+    supabase.from("gsc_properties").select("*", { count: "exact", head: true }).eq("is_active", true),
     supabase
       .from("alerts")
       .select("*, sites(domain)")
       .gte("created_at", sevenDaysAgoIso)
       .order("created_at", { ascending: false })
       .limit(10),
-    supabase.from("sites").select("*, keywords(count), deindexed_urls(count)").eq("is_active", true).order("domain"),
+    supabase.from("sites").select("*, keywords(count)").eq("is_active", true).order("domain"),
   ]);
-
-  const deindexedCount = deindexed?.length ?? 0;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <Link href="/gsc">
+          <Badge variant="outline" className="cursor-pointer hover:bg-accent px-3 py-1">
+            <BarChart3 className="h-3.5 w-3.5 mr-1" />
+            Search Console
+          </Badge>
+        </Link>
+      </div>
 
       {/* Stats cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Sites</CardTitle>
+            <CardTitle className="text-sm font-medium">Sites actifs</CardTitle>
             <Globe className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -62,34 +65,30 @@ export default async function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Deindexed URLs</CardTitle>
-            <FileWarning className="h-4 w-4 text-destructive" />
+            <CardTitle className="text-sm font-medium">GSC Properties</CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">
-              {deindexedCount}
-            </div>
+            <div className="text-2xl font-bold">{propertiesCount ?? 0}</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Alertes récentes (7j)</CardTitle>
+            <CardTitle className="text-sm font-medium">Alertes (7j)</CardTitle>
             <AlertTriangle className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-500">
               {alertsCount ?? 0}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Non lues, {"<"} 7 jours
-            </p>
+            <p className="text-xs text-muted-foreground">Non lues</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Keywords Tracked</CardTitle>
+            <CardTitle className="text-sm font-medium">Keywords</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -100,57 +99,12 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Deindexed URLs - Critical section */}
-      {deindexedCount > 0 && (
-        <Card className="border-destructive">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <FileWarning className="h-5 w-5" />
-              URLs Deindexed - Action Required
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {deindexed?.slice(0, 5).map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
-                >
-                  <div>
-                    <p className="font-medium">{d.url}</p>
-                  </div>
-                  <Badge
-                    variant={
-                      d.status === "detected"
-                        ? "destructive"
-                        : "secondary"
-                    }
-                  >
-                    {d.status}
-                  </Badge>
-                </div>
-              ))}
-              {deindexedCount > 5 && (
-                <Link
-                  href="/indexation"
-                  className="text-sm text-primary hover:underline"
-                >
-                  View all {deindexedCount} deindexed URLs
-                </Link>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Sites grid */}
       <div>
         <h2 className="mb-4 text-xl font-semibold">Sites</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sites?.map((site) => {
-            const deindexCount = (site.deindexed_urls as unknown as { count: number }[])?.[0]?.count ?? 0;
             const kwCount = (site.keywords as unknown as { count: number }[])?.[0]?.count ?? 0;
-            const status = deindexCount > 0 ? "destructive" : "default";
 
             return (
               <Link key={site.id} href={`/sites/${site.id}`}>
@@ -167,11 +121,6 @@ export default async function DashboardPage() {
                   <CardContent>
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <span>{kwCount} keywords</span>
-                      {deindexCount > 0 && (
-                        <Badge variant={status}>
-                          {deindexCount} deindexed
-                        </Badge>
-                      )}
                     </div>
                   </CardContent>
                 </Card>

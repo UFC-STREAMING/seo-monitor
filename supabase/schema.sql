@@ -174,7 +174,7 @@ COMMENT ON COLUMN alert_rules.site_id IS 'When NULL the rule applies to all site
 -- ---------------------------------------------------------------------------
 CREATE TABLE indexer_tasks (
     id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_id         text        NOT NULL,            -- external ID from Rapid Indexer API
+    task_id         text        NOT NULL,
     site_id         uuid        REFERENCES sites ON DELETE SET NULL,
     urls            text[]      NOT NULL,
     status          text        NOT NULL DEFAULT 'pending'
@@ -184,7 +184,7 @@ CREATE TABLE indexer_tasks (
     results         jsonb
 );
 
-COMMENT ON TABLE indexer_tasks IS 'Bulk re-indexation requests submitted to Rapid Indexer.';
+COMMENT ON TABLE indexer_tasks IS 'Bulk re-indexation requests.';
 
 
 -- ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ CREATE TABLE api_usage_log (
     id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         uuid        NOT NULL REFERENCES auth.users ON DELETE CASCADE,
     service         text        NOT NULL
-                                CHECK (service IN ('dataforseo', 'rapid_indexer', 'brave')),
+                                CHECK (service IN ('dataforseo', 'brave')),
     endpoint        text,
     credits_used    numeric     DEFAULT 0,
     cost_usd        numeric     DEFAULT 0,
@@ -214,7 +214,7 @@ CREATE TABLE site_pages (
     source          text        NOT NULL DEFAULT 'sitemap',  -- 'sitemap' | 'manual'
     index_status    text        DEFAULT 'unknown',           -- 'unknown' | 'indexed' | 'not_indexed' | 'checking' | 'error'
     last_checked_at timestamptz,
-    checker_task_id text,                                    -- Rapid Indexer checker task_id
+    checker_task_id text,
     created_at      timestamptz DEFAULT now(),
     updated_at      timestamptz DEFAULT now(),
 
@@ -222,7 +222,7 @@ CREATE TABLE site_pages (
 );
 
 COMMENT ON TABLE  site_pages IS 'All discovered pages per site (from sitemap or manual import) with Google indexation status.';
-COMMENT ON COLUMN site_pages.checker_task_id IS 'Rapid Indexer checker task_id when using bulk check method.';
+COMMENT ON COLUMN site_pages.checker_task_id IS 'Checker task_id when using bulk check method.';
 
 
 -- =============================================================================

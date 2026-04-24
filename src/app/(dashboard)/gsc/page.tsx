@@ -46,10 +46,25 @@ import {
   Eye,
   Target,
   TrendingDown,
+  TrendingUp,
   Lightbulb,
   Flame,
+  Trophy,
+  Skull,
+  FileX,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,6 +121,48 @@ interface PowerScoreItem {
   property_site_url: string;
 }
 
+interface SiteRanking {
+  site_id: string;
+  domain: string;
+  location_code: number | null;
+  clicks: number;
+  impressions: number;
+  avg_ctr: number;
+  avg_position: number;
+  clicks_trend_pct: number;
+  impressions_trend_pct: number;
+  prev_clicks: number;
+  unique_queries: number;
+  status: "star" | "growing" | "stable" | "declining" | "dead";
+}
+
+interface SitesRankingResponse {
+  sites: SiteRanking[];
+  totals: { clicks: number; impressions: number; active_sites: number; dead_sites: number };
+}
+
+interface TimeseriesPoint {
+  date: string;
+  clicks: number;
+  impressions: number;
+}
+
+interface NotIndexedSite {
+  domain: string;
+  site_id: string;
+  sitemap_urls: number;
+  indexed_urls: number;
+  not_indexed_urls: string[];
+  indexation_rate: number;
+}
+
+interface NotIndexedResponse {
+  sites: NotIndexedSite[];
+  total_sitemap: number;
+  total_not_indexed: number;
+  total_indexed: number;
+}
+
 interface AutoRules {
   min_clicks_keyword: number;
   min_clicks_page_daily: number;
@@ -150,6 +207,11 @@ function getFlag(alpha3: string): string {
     .join("");
 }
 
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function GscPage() {
@@ -158,6 +220,11 @@ export default function GscPage() {
   const [trafficDrops, setTrafficDrops] = useState<TrafficDrop[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [powerScores, setPowerScores] = useState<PowerScoreItem[]>([]);
+  const [sitesRanking, setSitesRanking] = useState<SiteRanking[]>([]);
+  const [sitesTotals, setSitesTotals] = useState<SitesRankingResponse["totals"] | null>(null);
+  const [timeseries, setTimeseries] = useState<TimeseriesPoint[]>([]);
+  const [notIndexed, setNotIndexed] = useState<NotIndexedResponse | null>(null);
+  const [notIndexedLoading, setNotIndexedLoading] = useState(false);
   const [rules, setRules] = useState<AutoRules>({
     min_clicks_keyword: 5,
     min_clicks_page_daily: 5,
@@ -170,17 +237,19 @@ export default function GscPage() {
   const [detecting, setDetecting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filterCountry, setFilterCountry] = useState<string>("all");
-  const [days, setDays] = useState<string>("28");
+  const [days, setDays] = useState<string>("4");
   const [dropDays, setDropDays] = useState<string>("7");
   const [activeTab, setActiveTab] = useState("overview");
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
 
-    const [propsRes, rulesRes, sitesRes] = await Promise.all([
+    const [propsRes, rulesRes, sitesRes, rankingRes, timeseriesRes] = await Promise.all([
       fetch(`/api/gsc/properties?days=${days}`),
       fetch("/api/gsc/rules"),
       supabase.from("sites").select("id, domain").order("domain"),
+      fetch(`/api/gsc/sites-ranking?days=${days}`),
+      fetch(`/api/gsc/timeseries?days=${Math.max(parseInt(days), 14)}`),
     ]);
 
     if (propsRes.ok) {
@@ -190,6 +259,17 @@ export default function GscPage() {
 
     if (rulesRes.ok) {
       setRules(await rulesRes.json());
+    }
+
+    if (rankingRes.ok) {
+      const data: SitesRankingResponse = await rankingRes.json();
+      setSitesRanking(data.sites ?? []);
+      setSitesTotals(data.totals ?? null);
+    }
+
+    if (timeseriesRes.ok) {
+      const data = await timeseriesRes.json();
+      setTimeseries(data.series ?? []);
     }
 
     setUserSites(sitesRes.data ?? []);
@@ -223,7 +303,17 @@ export default function GscPage() {
         .then((r) => r.json())
         .then((data) => setPowerScores(Array.isArray(data) ? data : []));
     }
-  }, [activeTab, loading, days, dropDays, trafficDrops.length, opportunities.length, powerScores.length]);
+    if (activeTab === "not-indexed" && !notIndexed && !notIndexedLoading) {
+      setNotIndexedLoading(true);
+      fetch("/api/gsc/not-indexed?days=30")
+        .then((r) => r.json())
+        .then((data) => {
+          setNotIndexed(data);
+          setNotIndexedLoading(false);
+        })
+        .catch(() => setNotIndexedLoading(false));
+    }
+  }, [activeTab, loading, days, dropDays, trafficDrops.length, opportunities.length, powerScores.length, notIndexed, notIndexedLoading]);
 
   useEffect(() => {
     fetchData();
@@ -271,6 +361,7 @@ export default function GscPage() {
         setTrafficDrops([]);
         setOpportunities([]);
         setPowerScores([]);
+        setNotIndexed(null);
         fetchData();
       } else {
         toast.error(data.error || "Failed to sync data");
@@ -335,8 +426,8 @@ export default function GscPage() {
 
   const periodLabel: Record<string, string> = {
     "4": "24h",
-    "7": "7d",
-    "28": "28d",
+    "7": "7j",
+    "28": "28j",
     "90": "3 mois",
   };
 
@@ -362,7 +453,7 @@ export default function GscPage() {
         <div>
           <h1 className="text-2xl font-bold">Search Console</h1>
           <p className="text-sm text-muted-foreground">
-            {properties.length} properties tracked
+            {properties.length} properties &middot; {sitesRanking.length} sites
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -430,17 +521,17 @@ export default function GscPage() {
 
           <Button variant="outline" size="sm" onClick={handleSyncProperties} disabled={syncingProperties}>
             <Globe className="h-4 w-4 mr-1" />
-            {syncingProperties ? "Syncing..." : "Sync Properties"}
+            {syncingProperties ? "..." : "Properties"}
           </Button>
 
           <Button variant="outline" size="sm" onClick={handleSyncData} disabled={syncing}>
             <RefreshCw className={`h-4 w-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync Data"}
+            {syncing ? "Syncing..." : "Sync"}
           </Button>
 
           <Button size="sm" onClick={handleAutoDetect} disabled={detecting}>
             <Zap className="h-4 w-4 mr-1" />
-            {detecting ? "Detecting..." : "Auto-Detect"}
+            {detecting ? "..." : "Detect"}
           </Button>
         </div>
       </div>
@@ -452,6 +543,10 @@ export default function GscPage() {
           <TabsTrigger value="drops">
             <TrendingDown className="h-3.5 w-3.5 mr-1" />
             Baisses
+          </TabsTrigger>
+          <TabsTrigger value="not-indexed">
+            <FileX className="h-3.5 w-3.5 mr-1" />
+            Non-index&eacute;
           </TabsTrigger>
           <TabsTrigger value="opportunities">
             <Lightbulb className="h-3.5 w-3.5 mr-1" />
@@ -469,6 +564,7 @@ export default function GscPage() {
 
         {/* ── Overview Tab ─────────────────────────────────────────────── */}
         <TabsContent value="overview" className="space-y-6">
+          {/* KPI Cards */}
           <div className="grid grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-2">
@@ -483,7 +579,7 @@ export default function GscPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Total Impressions ({periodLabel[days]})
+                  Impressions ({periodLabel[days]})
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -492,10 +588,16 @@ export default function GscPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Properties</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Sites actifs</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{properties.length}</div>
+                <div className="text-2xl font-bold">{sitesTotals?.active_sites ?? 0}</div>
+                {(sitesTotals?.dead_sites ?? 0) > 0 && (
+                  <p className="text-xs text-red-500 flex items-center gap-1 mt-1">
+                    <Skull className="h-3 w-3" />
+                    {sitesTotals?.dead_sites} morts
+                  </p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -507,6 +609,196 @@ export default function GscPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Chart */}
+          {timeseries.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">
+                  Clicks & Impressions
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={timeseries}>
+                    <defs>
+                      <linearGradient id="colorClicks" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorImpressions" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDate}
+                      className="text-xs"
+                      tick={{ fontSize: 11 }}
+                    />
+                    <YAxis
+                      yAxisId="clicks"
+                      orientation="left"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v: number) => v.toLocaleString()}
+                    />
+                    <YAxis
+                      yAxisId="impressions"
+                      orientation="right"
+                      tick={{ fontSize: 11 }}
+                      tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toString()}
+                    />
+                    <Tooltip
+                      labelFormatter={(label) => formatDate(String(label))}
+                      formatter={(value, name) => [
+                        Number(value).toLocaleString(),
+                        name === "clicks" ? "Clicks" : "Impressions",
+                      ]}
+                    />
+                    <Legend />
+                    <Area
+                      yAxisId="clicks"
+                      type="monotone"
+                      dataKey="clicks"
+                      stroke="#3b82f6"
+                      fill="url(#colorClicks)"
+                      strokeWidth={2}
+                      name="Clicks"
+                    />
+                    <Area
+                      yAxisId="impressions"
+                      type="monotone"
+                      dataKey="impressions"
+                      stroke="#8b5cf6"
+                      fill="url(#colorImpressions)"
+                      strokeWidth={2}
+                      name="Impressions"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Sites Ranking (main view) */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="h-5 w-5" />
+                  Clicks par site ({periodLabel[days]})
+                </CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Variation vs p&eacute;riode pr&eacute;c&eacute;dente
+                </p>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {sitesRanking.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  Aucune donn&eacute;e. Synchronisez vos properties.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8">#</TableHead>
+                      <TableHead>Site</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Clicks</TableHead>
+                      <TableHead className="text-right">Impressions</TableHead>
+                      <TableHead className="text-right">CTR</TableHead>
+                      <TableHead className="text-right">Position moy.</TableHead>
+                      <TableHead className="text-right">Variation</TableHead>
+                      <TableHead className="text-right">Queries</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sitesRanking.map((site, i) => (
+                      <TableRow
+                        key={site.site_id}
+                        className={
+                          site.status === "dead"
+                            ? "opacity-50 bg-red-50 dark:bg-red-950/10"
+                            : site.status === "star"
+                              ? "bg-yellow-50 dark:bg-yellow-950/10"
+                              : site.status === "declining"
+                                ? "bg-orange-50 dark:bg-orange-950/10"
+                                : ""
+                        }
+                      >
+                        <TableCell className="font-bold text-muted-foreground">{i + 1}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{site.domain}</div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              site.status === "star" ? "default"
+                                : site.status === "growing" ? "default"
+                                  : site.status === "declining" ? "destructive"
+                                    : site.status === "dead" ? "destructive"
+                                      : "secondary"
+                            }
+                            className={
+                              site.status === "star" ? "bg-yellow-500 text-black"
+                                : site.status === "growing" ? "bg-green-500"
+                                  : ""
+                            }
+                          >
+                            {site.status === "star" && "Star"}
+                            {site.status === "growing" && "Growing"}
+                            {site.status === "stable" && "Stable"}
+                            {site.status === "declining" && "Declining"}
+                            {site.status === "dead" && "Dead"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {site.clicks.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {site.impressions.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {(site.avg_ctr * 100).toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {site.avg_position > 0 ? (
+                            <span className={
+                              site.avg_position <= 10 ? "text-green-600 font-medium"
+                                : site.avg_position <= 20 ? "text-blue-600"
+                                  : "text-orange-600"
+                            }>
+                              {site.avg_position}
+                            </span>
+                          ) : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span className={`flex items-center justify-end gap-1 font-medium ${
+                            site.clicks_trend_pct > 10 ? "text-green-600"
+                              : site.clicks_trend_pct < -10 ? "text-red-500"
+                                : "text-muted-foreground"
+                          }`}>
+                            {site.clicks_trend_pct > 0 ? (
+                              <TrendingUp className="h-3.5 w-3.5" />
+                            ) : site.clicks_trend_pct < 0 ? (
+                              <TrendingDown className="h-3.5 w-3.5" />
+                            ) : null}
+                            {site.clicks_trend_pct > 0 ? "+" : ""}{site.clicks_trend_pct}%
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {site.unique_queries.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Properties Grid */}
           <Card>
@@ -520,7 +812,7 @@ export default function GscPage() {
               {properties.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <p>No GSC properties found.</p>
-                  <p className="text-sm mt-1">Click &quot;Sync Properties&quot; to discover your sites.</p>
+                  <p className="text-sm mt-1">Click &quot;Properties&quot; to discover your sites.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -558,7 +850,7 @@ export default function GscPage() {
                         </div>
                         {prop.last_synced_at && (
                           <p className="text-xs text-muted-foreground mt-2">
-                            Last sync: {new Date(prop.last_synced_at).toLocaleDateString()}
+                            Sync: {new Date(prop.last_synced_at).toLocaleDateString()}
                           </p>
                         )}
                       </CardContent>
@@ -644,6 +936,133 @@ export default function GscPage() {
                 </Table>
               </CardContent>
             </Card>
+          )}
+        </TabsContent>
+
+        {/* ── Non-Indexed Tab ──────────────────────────────────────── */}
+        <TabsContent value="not-indexed" className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <FileX className="h-5 w-5" />
+              URLs non index&eacute;es
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Fiches produit pr&eacute;sentes dans le sitemap mais sans impressions dans GSC (30 derniers jours)
+            </p>
+          </div>
+
+          {notIndexedLoading ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                <RefreshCw className="h-5 w-5 animate-spin inline mr-2" />
+                Analyse des sitemaps en cours...
+              </CardContent>
+            </Card>
+          ) : !notIndexed ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Chargement...
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              {/* Summary */}
+              <div className="grid grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      URLs Sitemap
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{notIndexed.total_sitemap.toLocaleString()}</div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Index&eacute;es
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-green-600">
+                      {notIndexed.total_indexed.toLocaleString()}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className={notIndexed.total_not_indexed > 0 ? "border-orange-500" : ""}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                      <AlertTriangle className="h-3.5 w-3.5 text-orange-500" />
+                      Non index&eacute;es
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-orange-500">
+                      {notIndexed.total_not_indexed.toLocaleString()}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Per-site breakdown */}
+              {notIndexed.sites.map((site) => (
+                <Card key={site.site_id}>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Globe className="h-4 w-4" />
+                        {site.domain}
+                      </CardTitle>
+                      <div className="flex items-center gap-3 text-sm">
+                        <Badge variant="outline">{site.sitemap_urls} sitemap</Badge>
+                        <Badge variant="default" className="bg-green-600">
+                          {site.indexed_urls} index&eacute;es
+                        </Badge>
+                        {site.not_indexed_urls.length > 0 && (
+                          <Badge variant="destructive">
+                            {site.not_indexed_urls.length} manquantes
+                          </Badge>
+                        )}
+                        <span className="text-muted-foreground font-medium">
+                          {site.indexation_rate}%
+                        </span>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  {site.not_indexed_urls.length > 0 && (
+                    <CardContent>
+                      <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                        {site.not_indexed_urls.map((url) => (
+                          <div
+                            key={url}
+                            className="flex items-center gap-2 text-sm py-1 px-2 rounded hover:bg-accent"
+                          >
+                            <FileX className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="truncate text-muted-foreground hover:text-foreground"
+                            >
+                              {url.replace(/https?:\/\/(www\.)?/, "")}
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  )}
+                </Card>
+              ))}
+
+              {notIndexed.sites.length === 0 && (
+                <Card>
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    Aucun site avec sitemap trouv&eacute;. V&eacute;rifiez que vos sites ont un sitemap.xml accessible.
+                  </CardContent>
+                </Card>
+              )}
+            </>
           )}
         </TabsContent>
 

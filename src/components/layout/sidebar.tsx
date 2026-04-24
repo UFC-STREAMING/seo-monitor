@@ -6,13 +6,14 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Globe,
-  FileWarning,
   Bell,
   DollarSign,
   Network,
   KeyRound,
   LogOut,
   BarChart3,
+  Flame,
+  Link2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -21,7 +22,8 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
-  { name: "Indexation", href: "/indexation", icon: FileWarning },
+  { name: "Brands", href: "/brands", icon: Flame },
+  { name: "Linking", href: "/linking", icon: Link2 },
   { name: "Network", href: "/network", icon: Network },
   { name: "Alerts", href: "/alerts", icon: Bell },
   { name: "Costs", href: "/costs", icon: DollarSign },
