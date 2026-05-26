@@ -151,8 +151,9 @@ async function urlInspectionResponse(
   const sbAny = supabase as never as {
     from: (t: string) => {
       select: (cols: string) => {
-        eq: (c: string, v: unknown) => Promise<{ data: unknown; error: unknown }>;
-        order?: (c: string, o: { ascending: boolean }) => Promise<{ data: unknown; error: unknown }>;
+        eq: (c: string, v: unknown) => {
+          limit: (n: number) => Promise<{ data: unknown; error: unknown }>;
+        };
       };
     };
   };
@@ -166,13 +167,13 @@ async function urlInspectionResponse(
     sites!inner(id, domain, is_active)
   `;
 
-  let query;
-  if (opts.siteId) {
-    query = sbAny.from("url_inspections").select(baseSelect).eq("site_id", opts.siteId);
-  } else {
-    query = sbAny.from("url_inspections").select(baseSelect).eq("sites.is_active", true);
-  }
-  const { data, error } = await query;
+  // PostgREST default cap is 1000 rows; without an explicit .limit() large sites
+  // (e.g. diabetologie-hagen.de with 109 product URLs) get their inspection set
+  // truncated and the dashboard reports wrong indexation counts.
+  const filtered = opts.siteId
+    ? sbAny.from("url_inspections").select(baseSelect).eq("site_id", opts.siteId)
+    : sbAny.from("url_inspections").select(baseSelect).eq("sites.is_active", true);
+  const { data, error } = await filtered.limit(100000);
   if (error) {
     return NextResponse.json({ error: "Query failed", details: error }, { status: 500 });
   }
