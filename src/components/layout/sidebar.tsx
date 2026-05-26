@@ -14,6 +14,7 @@ import {
   BarChart3,
   Flame,
   Link2,
+  FileSearch,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -22,6 +23,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
+  { name: "Indexation", href: "/indexation", icon: FileSearch },
   { name: "Brands", href: "/brands", icon: Flame },
   { name: "Linking", href: "/linking", icon: Link2 },
   { name: "Network", href: "/network", icon: Network },

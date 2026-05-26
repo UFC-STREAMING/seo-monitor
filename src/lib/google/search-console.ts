@@ -1,6 +1,7 @@
 import { GoogleAuth } from "./auth";
 
 const WEBMASTERS_API = "https://www.googleapis.com/webmasters/v3";
+const SEARCH_CONSOLE_API = "https://searchconsole.googleapis.com/v1";
 const GSC_SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"];
 
 export interface GscSiteEntry {
@@ -14,6 +15,18 @@ export interface GscSearchAnalyticsRow {
   impressions: number;
   ctr: number;
   position: number;
+}
+
+export interface GscUrlInspectionResult {
+  verdict: "PASS" | "NEUTRAL" | "FAIL" | "VERDICT_UNSPECIFIED";
+  coverageState?: string;
+  robotsTxtState?: string;
+  indexingState?: string;
+  pageFetchState?: string;
+  lastCrawlTime?: string;
+  crawledAs?: string;
+  googleCanonical?: string;
+  userCanonical?: string;
 }
 
 export class GoogleSearchConsoleClient {
@@ -95,6 +108,42 @@ export class GoogleSearchConsoleClient {
     return data.rows ?? [];
   }
 
+  /**
+   * Inspect a URL for its real indexation status (uses urlInspection API).
+   * Quota: 2000 requests/day/property, 600/minute.
+   * Returns null on HTTP error (caller logs and skips).
+   */
+  async inspectUrl(
+    siteProperty: string,
+    inspectionUrl: string,
+    languageCode = "en-US"
+  ): Promise<{ result: GscUrlInspectionResult | null; error?: string }> {
+    const token = await this.auth.getAccessToken(GSC_SCOPES);
+
+    const response = await fetch(
+      `${SEARCH_CONSOLE_API}/urlInspection/index:inspect`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inspectionUrl,
+          siteUrl: siteProperty,
+          languageCode,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      return { result: null, error: `HTTP ${response.status}: ${body.slice(0, 200)}` };
+    }
+
+    const data = await response.json();
+    return { result: data.inspectionResult?.indexStatusResult ?? null };
+  }
 }
 
 /** Singleton instance */

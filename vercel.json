@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/check-indexation",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/inspect-urls",
+      "schedule": "30 6 * * *"
     }
   ]
 }
