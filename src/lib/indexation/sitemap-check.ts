@@ -133,10 +133,12 @@ interface GscPageRow {
 interface SupabaseClientLike {
   from(table: string): {
     select(cols: string): {
-      eq(col: string, val: unknown): {
+      in(col: string, vals: unknown[]): {
         gte(col: string, val: unknown): {
           gt(col: string, val: number): {
-            not(col: string, op: string, val: unknown): Promise<{ data: GscPageRow[] | null }>;
+            not(col: string, op: string, val: unknown): {
+              limit(n: number): Promise<{ data: GscPageRow[] | null }>;
+            };
           };
         };
       };
@@ -172,8 +174,8 @@ export async function computeIndexationForSite(
     }
 
     const gscProps = site.gsc_properties ?? [];
-    const gscPropId = gscProps[0]?.id;
-    if (!gscPropId) {
+    const gscPropIds = gscProps.map((p) => p.id).filter(Boolean);
+    if (gscPropIds.length === 0) {
       base.error = "no_gsc_property";
       base.not_indexed_urls = sitemapUrls;
       base.not_indexed_urls_count = sitemapUrls.length;
@@ -184,13 +186,18 @@ export async function computeIndexationForSite(
     sinceDate.setDate(sinceDate.getDate() - lookbackDays);
     const dateStr = sinceDate.toISOString().split("T")[0];
 
+    // A site can be linked to several GSC properties (sc-domain + URL prefix variants).
+    // Querying only the first one drops impressions that landed on the other variant.
+    // The default PostgREST row cap is 1000 — set an explicit high limit so large
+    // (page, query, country, date) sets are not silently truncated.
     const { data: gscPages } = await supabase
       .from("gsc_search_data")
       .select("page")
-      .eq("gsc_property_id", gscPropId)
+      .in("gsc_property_id", gscPropIds)
       .gte("date", dateStr)
       .gt("impressions", 0)
-      .not("page", "is", null);
+      .not("page", "is", null)
+      .limit(100000);
 
     const indexedPages = new Set(
       (gscPages ?? [])

@@ -32,10 +32,13 @@ export async function GET(request: Request) {
     });
   }
 
-  // Date range: last 7 days including TODAY (dataState: "all" gives fresh data)
+  // Date range: last 30 days including TODAY (dataState: "all" gives fresh data).
+  // Must match the lookback window used by computeIndexationForSite — otherwise
+  // pages with impressions older than the sync window are absent from gsc_search_data
+  // and falsely classified as "not indexed".
   const endDate = new Date();
   const startDate = new Date(endDate);
-  startDate.setDate(startDate.getDate() - 7);
+  startDate.setDate(startDate.getDate() - 30);
 
   const startStr = startDate.toISOString().split("T")[0];
   const endStr = endDate.toISOString().split("T")[0];
