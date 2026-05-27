@@ -152,7 +152,10 @@ async function urlInspectionResponse(
     from: (t: string) => {
       select: (cols: string) => {
         eq: (c: string, v: unknown) => {
-          limit: (n: number) => Promise<{ data: unknown; error: unknown }>;
+          range: (
+            from: number,
+            to: number
+          ) => Promise<{ data: unknown; error: unknown }>;
         };
       };
     };
@@ -167,18 +170,23 @@ async function urlInspectionResponse(
     sites!inner(id, domain, is_active)
   `;
 
-  // PostgREST default cap is 1000 rows; without an explicit .limit() large sites
-  // (e.g. diabetologie-hagen.de with 109 product URLs) get their inspection set
-  // truncated and the dashboard reports wrong indexation counts.
-  const filtered = opts.siteId
-    ? sbAny.from("url_inspections").select(baseSelect).eq("site_id", opts.siteId)
-    : sbAny.from("url_inspections").select(baseSelect).eq("sites.is_active", true);
-  const { data, error } = await filtered.limit(100000);
-  if (error) {
-    return NextResponse.json({ error: "Query failed", details: error }, { status: 500 });
+  // Supabase enforces a max-rows cap on PostgREST (~1000). .limit() doesn't
+  // bypass it. We paginate explicitly via .range() and stop when a page is
+  // shorter than PAGE_SIZE.
+  const PAGE_SIZE = 1000;
+  const rows: InspectionRow[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const builder = opts.siteId
+      ? sbAny.from("url_inspections").select(baseSelect).eq("site_id", opts.siteId)
+      : sbAny.from("url_inspections").select(baseSelect).eq("sites.is_active", true);
+    const { data, error } = await builder.range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      return NextResponse.json({ error: "Query failed", details: error }, { status: 500 });
+    }
+    const chunk = (data ?? []) as unknown as InspectionRow[];
+    rows.push(...chunk);
+    if (chunk.length < PAGE_SIZE) break;
   }
-
-  const rows = (data ?? []) as unknown as InspectionRow[];
 
   type SiteAcc = {
     site_id: string;
