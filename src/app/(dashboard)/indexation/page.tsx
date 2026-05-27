@@ -43,25 +43,45 @@ export default function IndexationPage() {
           eq: (
             c: string,
             v: unknown
-          ) => Promise<{ data: InspectionRow[] | null; error: { message: string } | null }>;
+          ) => {
+            range: (
+              from: number,
+              to: number
+            ) => Promise<{
+              data: InspectionRow[] | null;
+              error: { message: string } | null;
+            }>;
+          };
         };
       };
     };
-    const { data, error } = await sbAny
-      .from("url_inspections")
-      .select(
-        "url, verdict, coverage_state, page_fetch_state, inspected_at, sites!inner(id, domain, is_active)"
-      )
-      .eq("sites.is_active", true);
 
-    if (error) {
-      toast.error("Failed to load inspections: " + error.message);
-      setLoading(false);
-      return;
+    // Supabase enforces a ~1000-row server cap on PostgREST. Paginate via
+    // .range() until a page returns fewer than PAGE_SIZE rows, otherwise
+    // sites near the end of the result set get their inspection counts
+    // truncated (e.g. dr-ibbeken.de showed 5/5 instead of the actual 84).
+    const PAGE_SIZE = 1000;
+    const collected: InspectionRow[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await sbAny
+        .from("url_inspections")
+        .select(
+          "url, verdict, coverage_state, page_fetch_state, inspected_at, sites!inner(id, domain, is_active)"
+        )
+        .eq("sites.is_active", true)
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) {
+        toast.error("Failed to load inspections: " + error.message);
+        setLoading(false);
+        return;
+      }
+      const chunk = data ?? [];
+      collected.push(...chunk);
+      if (chunk.length < PAGE_SIZE) break;
     }
 
     const bySite = new Map<string, SiteSummary>();
-    for (const r of data ?? []) {
+    for (const r of collected) {
       if (!r.sites) continue;
       let acc = bySite.get(r.sites.id);
       if (!acc) {
