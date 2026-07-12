@@ -15,12 +15,14 @@ import {
   Flame,
   Link2,
   FileSearch,
+  TrendingUp,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Rankings EMD", href: "/rankings", icon: TrendingUp },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileSearch },

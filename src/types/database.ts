@@ -8,7 +8,9 @@
 
 export type Niche = "casino" | "nutra";
 
-export type SiteType = "money" | "emd" | "pbn" | "nutra";
+export type SiteType = "money" | "emd" | "pbn" | "nutra" | "other";
+
+export type SiteCategory = "emd" | "shop" | "other";
 
 export type DeindexStatus = "detected" | "reindex_submitted" | "reindexed";
 
@@ -66,6 +68,10 @@ export interface Database {
           domain: string;
           niche: Niche;
           site_type: SiteType;
+          category: SiteCategory;
+          serp_tracking_enabled: boolean;
+          cf_account: string | null;
+          registrar: string | null;
           location_code: number | null;
           ip: string | null;
           hosting: string | null;
@@ -79,6 +85,10 @@ export interface Database {
           domain: string;
           niche: Niche;
           site_type: SiteType;
+          category?: SiteCategory;
+          serp_tracking_enabled?: boolean;
+          cf_account?: string | null;
+          registrar?: string | null;
           location_code?: number | null;
           ip?: string | null;
           hosting?: string | null;
@@ -92,6 +102,10 @@ export interface Database {
           domain?: string;
           niche?: Niche;
           site_type?: SiteType;
+          category?: SiteCategory;
+          serp_tracking_enabled?: boolean;
+          cf_account?: string | null;
+          registrar?: string | null;
           location_code?: number | null;
           ip?: string | null;
           hosting?: string | null;
@@ -130,6 +144,7 @@ export interface Database {
           site_id: string;
           keyword: string;
           location_code: number;
+          is_primary: boolean;
           created_at: string;
         };
         Insert: {
@@ -137,6 +152,7 @@ export interface Database {
           site_id: string;
           keyword: string;
           location_code: number;
+          is_primary?: boolean;
           created_at?: string;
         };
         Update: {
@@ -144,6 +160,7 @@ export interface Database {
           site_id?: string;
           keyword?: string;
           location_code?: number;
+          is_primary?: boolean;
           created_at?: string;
         };
         Relationships: [
@@ -160,6 +177,52 @@ export interface Database {
             isOneToOne: false;
             referencedRelation: "locations";
             referencedColumns: ["code"];
+          },
+        ];
+      };
+
+      keyword_positions: {
+        Row: {
+          id: string;
+          keyword_id: string;
+          site_id: string;
+          position: number | null;
+          url_found: string | null;
+          serp_features: unknown;
+          checked_at: string;
+        };
+        Insert: {
+          id?: string;
+          keyword_id: string;
+          site_id: string;
+          position?: number | null;
+          url_found?: string | null;
+          serp_features?: unknown;
+          checked_at?: string;
+        };
+        Update: {
+          id?: string;
+          keyword_id?: string;
+          site_id?: string;
+          position?: number | null;
+          url_found?: string | null;
+          serp_features?: unknown;
+          checked_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "keyword_positions_keyword_id_fkey";
+            columns: ["keyword_id"];
+            isOneToOne: false;
+            referencedRelation: "keywords";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "keyword_positions_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "sites";
+            referencedColumns: ["id"];
           },
         ];
       };
@@ -786,6 +849,88 @@ export interface Database {
         };
         Relationships: [];
       };
+
+      domain_finance: {
+        Row: {
+          id: string;
+          site_id: string;
+          purchase_price: number;
+          purchase_date: string | null;
+          renewal_price: number;
+          renewal_date: string | null;
+          currency: string;
+          notes: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          site_id: string;
+          purchase_price?: number;
+          purchase_date?: string | null;
+          renewal_price?: number;
+          renewal_date?: string | null;
+          currency?: string;
+          notes?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          site_id?: string;
+          purchase_price?: number;
+          purchase_date?: string | null;
+          renewal_price?: number;
+          renewal_date?: string | null;
+          currency?: string;
+          notes?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "domain_finance_site_id_fkey";
+            columns: ["site_id"];
+            referencedRelation: "sites";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+
+      domain_revenue: {
+        Row: {
+          id: string;
+          site_id: string;
+          date: string;
+          network: string;
+          conversions: number;
+          revenue_usd: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          site_id: string;
+          date: string;
+          network?: string;
+          conversions?: number;
+          revenue_usd?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          site_id?: string;
+          date?: string;
+          network?: string;
+          conversions?: number;
+          revenue_usd?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "domain_revenue_site_id_fkey";
+            columns: ["site_id"];
+            referencedRelation: "sites";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
 
     Views: {
@@ -842,6 +987,8 @@ export type GscSearchData = Tables["gsc_search_data"]["Row"];
 export type CountryCodeMapping = Tables["country_code_mapping"]["Row"];
 export type GscAutoRule = Tables["gsc_auto_rules"]["Row"];
 export type BrandTracking = Tables["brand_tracking"]["Row"];
+export type DomainFinance = Tables["domain_finance"]["Row"];
+export type DomainRevenue = Tables["domain_revenue"]["Row"];
 
 // ---------------------------------------------------------------------------
 // Insert Type Aliases
