@@ -63,45 +63,23 @@ export async function fetchDailyOfferRevenue(
     .filter((r) => r.conversions > 0 || r.revenueUsd > 0);
 }
 
-// ── Attribution offre -> domaine EMD ─────────────────────────────────────────
+// ── Attribution sub1 -> domaine EMD (STRICT) ─────────────────────────────────
+//
+// Décision Leo 12/07/2026 : on n'attribue QUE les conversions dont le sub1
+// correspond au domaine. Pas de matching par nom d'offre — le trafic sans
+// sub1 peut venir des shops WP ou d'autres sources, et gonflait les chiffres
+// (ex. 435$ attribués à tort à orivelle-fungus-pen.co.uk).
+//
+// Les workers EMD envoient le sub1 avec des tirets à la place des points
+// (ex. "jetterix-es" pour jetterix.es) → comparaison normalisée.
 
-// Mots génériques/géo ignorés lors du matching (présents dans le domaine mais
-// pas forcément dans le nom de l'offre).
-const GENERIC_TOKENS = new Set([
-  "france", "australia", "japan", "turkiye", "deutschland", "espana",
-  "kasino", "kasyno", "casino", "capsules", "patch", "pro", "plus",
-  "official", "shop", "site", "co", "com", "net", "org", "uk", "fr", "de",
-  "es", "at", "ch", "nl", "no", "pl", "kz", "icu", "male", "enhancement",
-]);
-
-function domainTokens(domain: string): string[] {
-  return domain
-    .toLowerCase()
-    .replace(/\.[a-z.]+$/, "") // TLD (y compris .co.uk / .co.no)
-    .split(/[-.]/)
-    .flatMap((t) => t.split(/(?<=[a-z])(?=[0-9])/))
-    .filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t));
-}
-
-function normalize(s: string): string {
+/** "jetterix.es" / "jetterix-es" / "Jetterix ES" -> "jetterixes" */
+export function normalizeDomainKey(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/**
- * Attribue une offre à UN domaine EMD, ou null si ambigu / aucun match.
- * Règle stricte : tous les tokens significatifs du domaine doivent apparaître
- * dans le label de l'offre, et un seul domaine doit matcher.
- * (Les brands shop — Lulutox, CoreGLP… — ne matchent aucun domaine EMD.)
- */
-export function matchOfferToDomain(
-  offerLabel: string,
-  domains: string[]
-): string | null {
-  const offerNorm = normalize(offerLabel);
-  const matches = domains.filter((domain) => {
-    const tokens = domainTokens(domain);
-    if (tokens.length === 0) return false;
-    return tokens.every((t) => offerNorm.includes(normalize(t)));
-  });
-  return matches.length === 1 ? matches[0] : null;
+/** Everflow renvoie le label "N/A" quand le sub1 est vide. */
+export function cleanSub1(sub1: string | null): string | null {
+  if (!sub1 || sub1 === "N/A" || sub1.toLowerCase() === "n/a") return null;
+  return sub1;
 }

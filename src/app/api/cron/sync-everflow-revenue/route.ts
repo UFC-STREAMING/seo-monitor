@@ -3,7 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   EVERFLOW_NETWORKS,
   fetchDailyOfferRevenue,
-  matchOfferToDomain,
+  normalizeDomainKey,
+  cleanSub1,
 } from "@/lib/everflow/client";
 
 export const maxDuration = 300;
@@ -11,11 +12,10 @@ export const maxDuration = 300;
 const RESYNC_DAYS = 7; // re-scan glissant : rattrape les conversions tardives
 
 // Sync quotidien des revenus Everflow -> domain_revenue, par domaine EMD.
-// Attribution :
-//   1. sub1 == domaine EMD connu (exact, prioritaire — futur standard)
-//   2. sinon match strict nom d'offre <-> tokens du domaine (unique, sans
-//      ambiguïté) — les offres partagées avec les shops ne matchent pas.
-// Les offres avec revenu non attribuées sont remontées dans la réponse.
+// Attribution STRICTE : uniquement sub1 == domaine (comparaison normalisée,
+// "jetterix-es" == jetterix.es). Aucun matching par nom d'offre (le trafic
+// sans sub1 vient aussi des shops/autres sources → chiffres faux sinon).
+// Les revenus sans sub1 EMD sont listés dans la réponse pour visibilité.
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -31,8 +31,10 @@ export async function GET(request: NextRequest) {
   if (sitesErr || !emdSites) {
     return NextResponse.json({ error: sitesErr?.message }, { status: 500 });
   }
-  const siteByDomain = new Map(emdSites.map((s) => [s.domain, s.id]));
-  const domains = emdSites.map((s) => s.domain);
+  // Clé normalisée : "jetterix-es" (sub1 worker) == "jetterix.es" (domaine)
+  const siteByKey = new Map(
+    emdSites.map((s) => [normalizeDomainKey(s.domain), { id: s.id, domain: s.domain }])
+  );
 
   const days: string[] = [];
   for (let i = 0; i < RESYNC_DAYS; i++) {
@@ -56,32 +58,29 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      // Agrégation par domaine pour ce jour/réseau
-      const byDomain = new Map<string, { conversions: number; revenue: number }>();
+      // Agrégation par domaine pour ce jour/réseau — sub1 strict uniquement
+      const byDomain = new Map<string, { siteId: string; conversions: number; revenue: number }>();
       for (const row of rows) {
-        const domain =
-          (row.sub1 && siteByDomain.has(row.sub1) ? row.sub1 : null) ??
-          matchOfferToDomain(row.offerLabel, domains);
-        if (!domain) {
+        const sub1 = cleanSub1(row.sub1);
+        const site = sub1 ? siteByKey.get(normalizeDomainKey(sub1)) : undefined;
+        if (!site) {
           if (row.revenueUsd > 0) {
-            unmatched.set(
-              row.offerLabel,
-              (unmatched.get(row.offerLabel) ?? 0) + row.revenueUsd
-            );
+            const label = `${row.offerLabel}${sub1 ? ` [sub1=${sub1}]` : " [sans sub1]"}`;
+            unmatched.set(label, (unmatched.get(label) ?? 0) + row.revenueUsd);
           }
           continue;
         }
-        const cur = byDomain.get(domain) ?? { conversions: 0, revenue: 0 };
+        const cur =
+          byDomain.get(site.domain) ?? { siteId: site.id, conversions: 0, revenue: 0 };
         cur.conversions += row.conversions;
         cur.revenue += row.revenueUsd;
-        byDomain.set(domain, cur);
+        byDomain.set(site.domain, cur);
       }
 
       for (const [domain, agg] of byDomain) {
-        const siteId = siteByDomain.get(domain)!;
         const { error } = await supabase.from("domain_revenue").upsert(
           {
-            site_id: siteId,
+            site_id: agg.siteId,
             date,
             network: network.key,
             conversions: agg.conversions,
