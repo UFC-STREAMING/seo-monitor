@@ -37,21 +37,24 @@ export async function GET(request: Request) {
   }> = [];
   try {
     const nutra = createNutraFactoryClient();
+    // Schéma NF actuel : name / country (unique) / affiliate_link / offer_status
+    // (les anciennes colonnes product_name / countries / affiliate_url / active
+    // n'existent plus — cause historique du "Failed to fetch products").
     const { data, error } = await nutra
       .from("products")
-      .select("id, product_name, category, countries, affiliate_url, active")
-      .not("product_name", "is", null);
+      .select("id, name, category, country, affiliate_link, offer_status")
+      .not("name", "is", null);
 
     if (error) throw error;
     brands = (data ?? [])
-      .filter((p) => p.product_name && p.product_name.trim().length >= 2)
+      .filter((p) => p.name && p.name.trim().length >= 2)
       .map((p) => ({
         id: p.id,
-        product_name: p.product_name,
+        product_name: p.name,
         category: p.category ?? null,
-        countries: p.countries ?? null,
-        affiliate_url: p.affiliate_url ?? null,
-        active: p.active ?? true,
+        countries: p.country ? [p.country] : null,
+        affiliate_url: p.affiliate_link ?? null,
+        active: p.offer_status ? ["active", "hot"].includes(p.offer_status) : true,
       }));
   } catch (err) {
     console.error("Brand tracking: failed to fetch Nutra Factory products:", err);
