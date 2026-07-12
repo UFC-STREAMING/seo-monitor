@@ -78,16 +78,26 @@ export async function GET(request: Request) {
   const currentEndStr = currentWeekEnd.toISOString().split("T")[0];
   const prevStartStr = prevWeekStart.toISOString().split("T")[0];
 
-  // Fetch all GSC data for the 2-week window
-  const { data: gscData, error: gscError } = await supabase
-    .from("gsc_search_data")
-    .select("query, country, impressions, date")
-    .gte("date", prevStartStr)
-    .lte("date", currentEndStr);
+  // Fetch all GSC data for the 2-week window.
+  // Pagination explicite via .range() : PostgREST plafonne à 1000 lignes par
+  // défaut, ce qui tronquait l'analyse (impressions sous-comptées).
+  const PAGE_SIZE = 1000;
+  const gscData: Array<{ query: string; country: string; impressions: number; date: string }> = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data: page, error: gscError } = await supabase
+      .from("gsc_search_data")
+      .select("query, country, impressions, date")
+      .gte("date", prevStartStr)
+      .lte("date", currentEndStr)
+      .order("date", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
 
-  if (gscError) {
-    console.error("Brand tracking: GSC fetch error:", gscError);
-    return NextResponse.json({ error: "Failed to fetch GSC data" }, { status: 500 });
+    if (gscError) {
+      console.error("Brand tracking: GSC fetch error:", gscError);
+      return NextResponse.json({ error: "Failed to fetch GSC data" }, { status: 500 });
+    }
+    gscData.push(...(page ?? []));
+    if (!page || page.length < PAGE_SIZE) break;
   }
 
   // --- 3. Agréger par brand + country ---
