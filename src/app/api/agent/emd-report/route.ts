@@ -20,11 +20,16 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const { data: sites, error: sitesErr } = await supabase
+  // ?domain=jetterix.es -> rapport d'un seul site (pratique pour l'agent)
+  const domainFilter = new URL(request.url).searchParams.get("domain");
+
+  let sitesQuery = supabase
     .from("sites")
     .select("id, domain, is_active, serp_tracking_enabled")
     .eq("category", "emd")
     .order("domain");
+  if (domainFilter) sitesQuery = sitesQuery.eq("domain", domainFilter.toLowerCase());
+  const { data: sites, error: sitesErr } = await sitesQuery;
   if (sitesErr || !sites) {
     return NextResponse.json({ error: sitesErr?.message }, { status: 500 });
   }
