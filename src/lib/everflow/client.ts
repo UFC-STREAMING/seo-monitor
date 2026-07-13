@@ -83,3 +83,77 @@ export function cleanSub1(sub1: string | null): string | null {
   if (!sub1 || sub1 === "N/A" || sub1.toLowerCase() === "n/a") return null;
   return sub1;
 }
+
+// ── Rapport de conversions détaillé (avec referer = preuve d'origine) ────────
+
+export interface EverflowConversion {
+  sub1: string | null;
+  /** Domaine d'origine du clic enregistré par Everflow (ex. "orivelle-ongles.fr"). */
+  refererHost: string | null;
+  revenueUsd: number;
+  offerName: string;
+  /** Date UTC YYYY-MM-DD de la conversion. */
+  date: string;
+}
+
+function extractHost(referer: string | null | undefined): string | null {
+  if (!referer) return null;
+  let h = referer.trim().toLowerCase();
+  if (h.includes("://")) h = h.split("://")[1];
+  h = h.split("/")[0].split(":")[0].replace(/^www\./, "");
+  return h.includes(".") ? h : null;
+}
+
+/**
+ * Conversions détaillées sur une période (sub1 + referer + revenu).
+ * Le referer permet d'attribuer les ventes HISTORIQUES (avant le rollout
+ * sub1 du 13/07/2026) avec une preuve réelle.
+ */
+export async function fetchConversions(
+  apiKey: string,
+  from: string,
+  to: string
+): Promise<EverflowConversion[]> {
+  const out: EverflowConversion[] = [];
+  const PAGE_SIZE = 2000;
+  for (let page = 1; page <= 25; page++) {
+    const res = await fetch(`${EFLOW_API}/reporting/conversions`, {
+      method: "POST",
+      headers: { "X-Eflow-API-Key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to,
+        timezone_id: 67, // UTC
+        show_conversions: true,
+        show_events: false,
+        query: { filters: [] },
+        paging: { page, page_size: PAGE_SIZE },
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`Everflow conversions HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
+    const json = (await res.json()) as {
+      conversions?: Array<{
+        sub1?: string;
+        referer?: string;
+        revenue?: number;
+        conversion_unix_timestamp?: number;
+        relationship?: { offer?: { name?: string } };
+      }>;
+    };
+    const rows = json.conversions ?? [];
+    for (const r of rows) {
+      const ts = (r.conversion_unix_timestamp ?? 0) * 1000;
+      out.push({
+        sub1: cleanSub1(r.sub1 ?? null),
+        refererHost: extractHost(r.referer),
+        revenueUsd: r.revenue ?? 0,
+        offerName: r.relationship?.offer?.name ?? "",
+        date: new Date(ts).toISOString().slice(0, 10),
+      });
+    }
+    if (rows.length < PAGE_SIZE) break;
+  }
+  return out;
+}
