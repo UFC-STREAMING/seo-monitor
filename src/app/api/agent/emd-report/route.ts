@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   let sitesQuery = supabase
     .from("sites")
-    .select("id, domain, is_active, serp_tracking_enabled")
+    .select("id, domain, is_active, serp_tracking_enabled, last_rebuild_at, last_rebuild_reason, last_rebuild_by, indexed_pages, indexed_pages_at")
     .eq("category", "emd")
     .order("domain");
   if (domainFilter) sitesQuery = sitesQuery.eq("domain", domainFilter.toLowerCase());
@@ -119,6 +119,16 @@ export async function GET(request: NextRequest) {
     return {
       domain: site.domain,
       tracking_active: site.is_active && site.serp_tracking_enabled && !!kw,
+      is_active: site.is_active,
+      // Suivi des refontes : sans ces champs, l'agent d'amelioration
+      // quotidien repasserait sur les memes domaines. indexed_pages
+      // distingue "jamais indexe" (0) de "indexe mais non classe" (>0),
+      // deux cas qui appellent des actions differentes.
+      last_rebuild_at: site.last_rebuild_at ?? null,
+      last_rebuild_reason: site.last_rebuild_reason ?? null,
+      last_rebuild_by: site.last_rebuild_by ?? null,
+      indexed_pages: site.indexed_pages ?? null,
+      indexed_pages_at: site.indexed_pages_at ?? null,
       keyword: kw?.keyword ?? null,
       country: loc?.country_iso ?? null,
       position: current?.position ?? null,
