@@ -19,7 +19,7 @@ export async function GET() {
   // Sites EMD + à classer
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
-    .select("id, domain, category, site_type, cf_account, is_active, serp_tracking_enabled, location_code")
+    .select("id, domain, category, site_type, cf_account, is_active, serp_tracking_enabled, location_code, last_rebuild_at, last_rebuild_reason, last_rebuild_by, indexed_pages")
     .in("category", ["emd", "other"])
     .eq("user_id", user.id)
     .order("domain");
@@ -104,6 +104,12 @@ export async function GET() {
       site_id: site.id,
       domain: site.domain,
       is_active: site.is_active,
+      // Suivi des refontes : l'agent quotidien met un domaine en
+      // quarantaine 30 jours apres l'avoir retravaille.
+      last_rebuild_at: site.last_rebuild_at ?? null,
+      last_rebuild_reason: site.last_rebuild_reason ?? null,
+      last_rebuild_by: site.last_rebuild_by ?? null,
+      indexed_pages: site.indexed_pages ?? null,
       serp_tracking_enabled: site.serp_tracking_enabled,
       cf_account: site.cf_account,
       keyword: kw?.keyword ?? null,

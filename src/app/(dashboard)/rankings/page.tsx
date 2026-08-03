@@ -42,6 +42,10 @@ interface EmdRow {
   domain: string;
   is_active: boolean;
   serp_tracking_enabled: boolean;
+  last_rebuild_at: string | null;
+  last_rebuild_reason: string | null;
+  last_rebuild_by: string | null;
+  indexed_pages: number | null;
   cf_account: string | null;
   keyword: string | null;
   keyword_id: string | null;
@@ -345,6 +349,8 @@ export default function RankingsPage() {
                   <TableHead className="w-20">Position</TableHead>
                   <TableHead className="w-16">Δ</TableHead>
                   <TableHead className="w-28">Historique</TableHead>
+                  <TableHead className="w-20">Indexé</TableHead>
+                  <TableHead className="w-28">Refonte</TableHead>
                   <TableHead className="w-24">Achat $</TableHead>
                   <TableHead className="w-24">Renouv. $</TableHead>
                   <TableHead className="w-24 text-right">Revenus</TableHead>
@@ -539,6 +545,32 @@ function EmdTableRow({
       </TableCell>
       <TableCell>
         <Sparkline history={row.history} />
+      </TableCell>
+      <TableCell className="text-center tabular-nums">
+        {row.indexed_pages === null ? (
+          <span className="text-muted-foreground">—</span>
+        ) : row.indexed_pages === 0 ? (
+          <span className="text-destructive font-medium" title="Aucune page dans l'index Google : à soumettre à l'indexation">
+            0
+          </span>
+        ) : (
+          <span title="Pages présentes dans l'index Google">{row.indexed_pages}</span>
+        )}
+      </TableCell>
+      <TableCell className="text-xs">
+        {row.last_rebuild_at ? (
+          <span title={row.last_rebuild_reason ?? undefined}>
+            {new Date(row.last_rebuild_at).toLocaleDateString("fr-FR", {
+              day: "2-digit",
+              month: "2-digit",
+            })}
+            {row.last_rebuild_by ? (
+              <span className="block text-muted-foreground">{row.last_rebuild_by}</span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </TableCell>
       <FinanceCell
         initial={row.finance?.purchase_price ?? 0}
