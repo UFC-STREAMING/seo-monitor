@@ -76,6 +76,11 @@ export interface Database {
           ip: string | null;
           hosting: string | null;
           is_active: boolean;
+          last_rebuild_at: string | null;
+          last_rebuild_reason: string | null;
+          last_rebuild_by: string | null;
+          indexed_pages: number | null;
+          indexed_pages_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -93,6 +98,11 @@ export interface Database {
           ip?: string | null;
           hosting?: string | null;
           is_active?: boolean;
+          last_rebuild_at?: string | null;
+          last_rebuild_reason?: string | null;
+          last_rebuild_by?: string | null;
+          indexed_pages?: number | null;
+          indexed_pages_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -110,6 +120,11 @@ export interface Database {
           ip?: string | null;
           hosting?: string | null;
           is_active?: boolean;
+          last_rebuild_at?: string | null;
+          last_rebuild_reason?: string | null;
+          last_rebuild_by?: string | null;
+          indexed_pages?: number | null;
+          indexed_pages_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
