@@ -178,6 +178,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Site introuvable" }, { status: 404 });
   }
 
+  // ── toggle_active : ON/OFF du suivi automatique ─────────────────────────
+  // Un domaine OFF garde son historique mais l'agent d'amelioration
+  // quotidien l'ignore. Sert aux EMD dont l'offre affiliee est morte.
+  if (action === "toggle_active") {
+    const nextActive = Boolean(body.is_active);
+    const { error } = await supabase
+      .from("sites")
+      .update({ is_active: nextActive })
+      .eq("id", site_id);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, is_active: nextActive });
+  }
+
   // ── set_keyword : définit LE mot-clé principal (1 par domaine) ────────────
   if (action === "set_keyword") {
     const keyword = String(body.keyword ?? "").trim().toLowerCase();

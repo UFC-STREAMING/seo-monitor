@@ -343,6 +343,7 @@ export default function RankingsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-14">Suivi</TableHead>
                   <TableHead>Domaine</TableHead>
                   <TableHead>Mot-clé principal</TableHead>
                   <TableHead className="w-16">Pays</TableHead>
@@ -365,6 +366,14 @@ export default function RankingsPage() {
                     row={row}
                     checking={checking === row.site_id}
                     onCheck={() => runCheck(row.site_id)}
+                    onToggleActive={(next) =>
+                      postAction(
+                        { action: "toggle_active", site_id: row.site_id, is_active: next },
+                        next
+                          ? `Suivi réactivé pour ${row.domain}`
+                          : `${row.domain} retiré du suivi automatique`
+                      )
+                    }
                     onSaveKeyword={(keyword, iso) =>
                       postAction(
                         { action: "set_keyword", site_id: row.site_id, keyword, country_iso: iso },
@@ -472,12 +481,14 @@ function EmdTableRow({
   onCheck,
   onSaveKeyword,
   onSaveFinance,
+  onToggleActive,
 }: {
   row: EmdRow;
   checking: boolean;
   onCheck: () => void;
   onSaveKeyword: (keyword: string, iso: string) => Promise<boolean>;
   onSaveFinance: (field: "purchase_price" | "renewal_price", value: number) => Promise<boolean>;
+  onToggleActive: (next: boolean) => void;
 }) {
   const [keyword, setKeyword] = useState(row.keyword ?? "");
   const [iso, setIso] = useState(row.country_iso ?? "");
@@ -495,7 +506,29 @@ function EmdTableRow({
   }
 
   return (
-    <TableRow>
+    <TableRow className={row.is_active ? undefined : "opacity-50"}>
+      <TableCell>
+        <button
+          type="button"
+          onClick={() => onToggleActive(!row.is_active)}
+          title={
+            row.is_active
+              ? "Suivi actif — cliquer pour retirer ce domaine du traitement automatique"
+              : "Suivi désactivé — ce domaine est ignoré par l\u2019agent quotidien"
+          }
+          className={
+            "flex h-5 w-9 items-center rounded-full transition-colors " +
+            (row.is_active ? "bg-emerald-500" : "bg-muted-foreground/30")
+          }
+        >
+          <span
+            className={
+              "block h-4 w-4 rounded-full bg-white shadow transition-transform " +
+              (row.is_active ? "translate-x-4" : "translate-x-0.5")
+            }
+          />
+        </button>
+      </TableCell>
       <TableCell>
         <a
           href={`https://${row.domain}`}
