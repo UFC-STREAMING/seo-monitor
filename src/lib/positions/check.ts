@@ -1,17 +1,20 @@
-// Moteur de check de positions SERP (DataForSEO) — logique partagée entre
+// Moteur de check de positions SERP (Semscraper, ex-DataForSEO) — logique partagée entre
 // /api/positions/check (bouton "Check maintenant") et /api/cron/check-positions
 // (cron hebdo lundi 7h, avant le rapport de l'agent Hermes EMD à 9h).
 //
 // GARDE-FOU PÉRIMÈTRE : seuls les sites category='emd' AND serp_tracking_enabled
 // AND is_active sont vérifiés. Les shops e-commerce (GSC gratuit) ne génèrent
-// JAMAIS d'appel DataForSEO — le filtre est dans la requête SQL, pas en aval.
+// JAMAIS d'appel SERP payant — le filtre est dans la requête SQL, pas en aval.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { checkSerpPosition, DataForSeoBalanceError } from "@/lib/dataforseo/client";
+import {
+  checkSerpPositions,
+  SemscraperBalanceError,
+  type SerpCheckResult,
+} from "@/lib/semscraper/client";
 import { sendTelegramMessage } from "@/lib/telegram";
 
-const CONCURRENCY = 5;
 // Chute déclenchant une alerte position_drop
 const DROP_WARNING = 5;
 const DROP_CRITICAL = 15;
@@ -23,6 +26,7 @@ interface KeywordToCheck {
   domain: string;
   keyword: string;
   location_code: number;
+  country_iso: string;
   language_code: string;
 }
 
@@ -38,6 +42,7 @@ export interface PositionCheckOutcome {
 export interface RunResult {
   checked: number;
   found: number;
+  /** Coût total (EUR depuis Semscraper — nom gardé pour compat UI/agent). */
   total_cost_usd: number;
   balance_error: boolean;
   results: PositionCheckOutcome[];
@@ -55,13 +60,13 @@ export async function runPositionChecks(
   let query = supabase
     .from("keywords")
     .select(
-      "id, keyword, location_code, site_id, sites!inner(id, domain, user_id, category, serp_tracking_enabled, is_active), locations(default_language)"
+      "id, keyword, location_code, site_id, sites!inner(id, domain, user_id, category, serp_tracking_enabled, is_active), locations(default_language, country_iso)"
     )
     .eq("sites.category", "emd")
     .eq("sites.serp_tracking_enabled", true)
     .eq("sites.is_active", true)
     // 1 seul mot-clé payant par domaine (les keywords hérités du mode shop
-    // restent en base mais ne déclenchent aucun appel DataForSEO)
+    // restent en base mais ne déclenchent aucun appel SERP)
     .eq("is_primary", true);
   if (opts.siteId) query = query.eq("site_id", opts.siteId);
 
@@ -70,7 +75,7 @@ export async function runPositionChecks(
 
   const toCheck: KeywordToCheck[] = (rows ?? []).map((r) => {
     const site = r.sites as unknown as { id: string; domain: string; user_id: string };
-    const loc = r.locations as unknown as { default_language: string } | null;
+    const loc = r.locations as unknown as { default_language: string; country_iso: string } | null;
     return {
       keyword_id: r.id,
       site_id: site.id,
@@ -78,6 +83,7 @@ export async function runPositionChecks(
       domain: site.domain,
       keyword: r.keyword,
       location_code: r.location_code,
+      country_iso: loc?.country_iso ?? "FR",
       language_code: loc?.default_language ?? "en",
     };
   });
@@ -99,86 +105,96 @@ export async function runPositionChecks(
     previousBySite.set(k.keyword_id, prev?.position ?? null);
   }
 
-  // 3. Checks par lots (Vercel maxDuration oblige)
-  for (let i = 0; i < toCheck.length; i += CONCURRENCY) {
-    if (balanceError) break;
-    const batch = toCheck.slice(i, i + CONCURRENCY);
-
-    const outcomes = await Promise.all(
-      batch.map(async (k): Promise<PositionCheckOutcome> => {
-        const previous = previousBySite.get(k.keyword_id) ?? null;
-        try {
-          const check = await checkSerpPosition({
-            keyword: k.keyword,
-            locationCode: k.location_code,
-            languageCode: k.language_code,
-            targetDomain: k.domain,
-          });
-          totalCost += check.costUsd;
-
-          await supabase.from("keyword_positions").insert({
-            keyword_id: k.keyword_id,
-            site_id: k.site_id,
-            position: check.position,
-            url_found: check.urlFound,
-            serp_features: check.serpFeatures as never,
-          });
-
-          await supabase.from("api_usage_log").insert({
-            user_id: k.user_id,
-            service: "dataforseo",
-            endpoint: "serp/google/organic/live/advanced",
-            credits_used: 1,
-            cost_usd: check.costUsd,
-          });
-
-          // Alerte position_drop
-          if (previous !== null) {
-            const droppedOut = check.position === null;
-            const drop = check.position !== null ? check.position - previous : 999;
-            if (droppedOut || drop >= DROP_WARNING) {
-              await supabase.from("alerts").insert({
-                site_id: k.site_id,
-                alert_type: "position_drop",
-                severity: droppedOut || drop >= DROP_CRITICAL ? "critical" : "warning",
-                message: droppedOut
-                  ? `${k.domain} : "${k.keyword}" est sorti du top 100 (était #${previous})`
-                  : `${k.domain} : "${k.keyword}" #${previous} → #${check.position} (-${drop})`,
-              });
-            }
-          }
-
-          return {
-            domain: k.domain,
-            keyword: k.keyword,
-            position: check.position,
-            previous_position: previous,
-            url_found: check.urlFound,
-          };
-        } catch (err) {
-          if (err instanceof DataForSeoBalanceError) {
-            balanceError = true;
-          }
-          return {
-            domain: k.domain,
-            keyword: k.keyword,
-            position: null,
-            previous_position: previous,
-            url_found: null,
-            error: err instanceof Error ? err.message : String(err),
-          };
-        }
-      })
+  // 3. Un seul lot Semscraper (async, polling) pour tous les mots-clés
+  let checks: SerpCheckResult[] = [];
+  try {
+    checks = await checkSerpPositions(
+      toCheck.map((k) => ({
+        keyword: k.keyword,
+        countryIso: k.country_iso,
+        languageCode: k.language_code,
+        targetDomain: k.domain,
+      }))
     );
-    results.push(...outcomes);
+  } catch (err) {
+    if (err instanceof SemscraperBalanceError) balanceError = true;
+    const message = err instanceof Error ? err.message : String(err);
+    checks = toCheck.map(() => ({
+      position: null,
+      urlFound: null,
+      serpFeatures: [],
+      cost: 0,
+      error: message,
+    }));
+  }
+
+  for (let i = 0; i < toCheck.length; i++) {
+    const k = toCheck[i];
+    const check = checks[i];
+    const previous = previousBySite.get(k.keyword_id) ?? null;
+
+    // Échec (timeout, crédit...) : on n'écrit RIEN — une ligne null ferait
+    // croire à une sortie du top 100 et déclencherait une fausse alerte.
+    if (check.error) {
+      results.push({
+        domain: k.domain,
+        keyword: k.keyword,
+        position: null,
+        previous_position: previous,
+        url_found: null,
+        error: check.error,
+      });
+      continue;
+    }
+    totalCost += check.cost;
+
+    await supabase.from("keyword_positions").insert({
+      keyword_id: k.keyword_id,
+      site_id: k.site_id,
+      position: check.position,
+      url_found: check.urlFound,
+      serp_features: check.serpFeatures as never,
+    });
+
+    await supabase.from("api_usage_log").insert({
+      user_id: k.user_id,
+      service: "semscraper",
+      endpoint: "v1/serp google_search depth=10",
+      credits_used: 1,
+      cost_usd: check.cost,
+    });
+
+    // Alerte position_drop
+    if (previous !== null) {
+      const droppedOut = check.position === null;
+      const drop = check.position !== null ? check.position - previous : 999;
+      if (droppedOut || drop >= DROP_WARNING) {
+        await supabase.from("alerts").insert({
+          site_id: k.site_id,
+          alert_type: "position_drop",
+          severity: droppedOut || drop >= DROP_CRITICAL ? "critical" : "warning",
+          message: droppedOut
+            ? `${k.domain} : "${k.keyword}" est sorti du top 100 (était #${previous})`
+            : `${k.domain} : "${k.keyword}" #${previous} → #${check.position} (-${drop})`,
+        });
+      }
+    }
+
+    results.push({
+      domain: k.domain,
+      keyword: k.keyword,
+      position: check.position,
+      previous_position: previous,
+      url_found: check.urlFound,
+    });
   }
 
   // 4. Solde épuisé -> alerte immédiate, on ne perd pas la semaine en silence
   if (balanceError) {
     await sendTelegramMessage(
-      `<b>🚨 SEO Monitor — Solde DataForSEO épuisé</b>\n` +
+      `<b>🚨 SEO Monitor — Crédit Semscraper épuisé</b>\n` +
         `Le check hebdo des positions EMD est incomplet (${results.filter((r) => !r.error).length}/${toCheck.length}).\n` +
-        `→ Recharger le compte puis relancer le check depuis /rankings.`
+        `→ Recharger semscraper.com puis relancer le check depuis /rankings.`
     );
   }
 

@@ -19,6 +19,7 @@ export const maxDuration = 60;
 //   "renewal_price": 12.99,
 //   "renewal_date": "2027-07-13",
 //   "registrar": "dynadot",
+//   "hosting": "cloudflare" | "hostinger",  // défaut cloudflare
 //   "niche": "nutra" | "casino",
 //   "notes": "offre Everflow XYZ"
 // }
@@ -71,6 +72,8 @@ export async function POST(request: NextRequest) {
     locationCode = loc.code;
   }
 
+  const hosting =
+    body.hosting === "hostinger" || body.hosting === "cloudflare" ? body.hosting : null;
   const keyword = body.keyword ? String(body.keyword).trim().toLowerCase() : null;
   const niche = body.niche === "casino" ? "casino" : "nutra";
 
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
     };
     if (locationCode) patch.location_code = locationCode;
     if (body.registrar) patch.registrar = String(body.registrar);
+    if (hosting) patch.hosting = hosting;
     if (keyword) patch.serp_tracking_enabled = true;
     const { error } = await supabase.from("sites").update(patch).eq("id", siteId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -105,7 +109,7 @@ export async function POST(request: NextRequest) {
         category: "emd",
         serp_tracking_enabled: !!keyword,
         is_active: true,
-        hosting: "cloudflare",
+        hosting: hosting ?? "cloudflare",
         registrar: body.registrar ? String(body.registrar) : null,
         location_code: locationCode,
       })

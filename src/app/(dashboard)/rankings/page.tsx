@@ -47,6 +47,8 @@ interface EmdRow {
   last_rebuild_by: string | null;
   indexed_pages: number | null;
   cf_account: string | null;
+  hosting: string | null;
+  purchased_at: string | null;
   keyword: string | null;
   keyword_id: string | null;
   country_iso: string | null;
@@ -241,7 +243,7 @@ export default function RankingsPage() {
         toast.error("Solde DataForSEO épuisé — check incomplet");
       } else {
         toast.success(
-          `Check terminé : ${json.found}/${json.checked} dans le top 100 (${json.total_cost_usd} $)`
+          `Check terminé : ${json.found}/${json.checked} dans le top 100 (${json.total_cost_usd} €)`
         );
       }
       await load();
@@ -273,7 +275,7 @@ export default function RankingsPage() {
         <div>
           <h1 className="text-2xl font-bold">Rankings EMD</h1>
           <p className="text-sm text-muted-foreground">
-            Suivi hebdo des positions (DataForSEO, lundi 7h) — mot-clé et coûts éditables inline
+            Suivi hebdo des positions (Semscraper, lundi 7h) — tri par date d’achat — mot-clé et coûts éditables inline
           </p>
         </div>
         <Button onClick={() => runCheck()} disabled={checking !== null}>
@@ -345,6 +347,8 @@ export default function RankingsPage() {
                 <TableRow>
                   <TableHead className="w-14">Suivi</TableHead>
                   <TableHead>Domaine</TableHead>
+                  <TableHead className="w-24">Achat le</TableHead>
+                  <TableHead className="w-28">Hébergeur</TableHead>
                   <TableHead>Mot-clé principal</TableHead>
                   <TableHead className="w-16">Pays</TableHead>
                   <TableHead className="w-20">Position</TableHead>
@@ -540,6 +544,20 @@ function EmdTableRow({
         </a>
         {row.keyword && !row.serp_tracking_enabled && (
           <Badge variant="outline" className="ml-2 text-xs">pause</Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+        {row.purchased_at
+          ? new Date(row.purchased_at).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" })
+          : "—"}
+      </TableCell>
+      <TableCell>
+        {row.hosting === "hostinger" ? (
+          <Badge className="bg-violet-600 hover:bg-violet-600 text-white text-xs">Hostinger</Badge>
+        ) : row.hosting === "cloudflare" ? (
+          <Badge className="bg-orange-500 hover:bg-orange-500 text-white text-xs">Cloudflare</Badge>
+        ) : (
+          <Badge variant="outline" className="text-xs">{row.hosting ?? "?"}</Badge>
         )}
       </TableCell>
       <TableCell>

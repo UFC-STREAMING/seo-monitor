@@ -1,0 +1,1 @@
+alter table public.api_usage_log drop constraint api_usage_log_service_check; alter table public.api_usage_log add constraint api_usage_log_service_check check (service = any (array['dataforseo','rapid_indexer','brave','gsc','semscraper']));

@@ -31,7 +31,7 @@ export type IndexerTaskStatus =
   | "completed"
   | "failed";
 
-export type ApiService = "dataforseo" | "brave" | "gsc" | "google_indexing";
+export type ApiService = "dataforseo" | "semscraper" | "brave" | "gsc" | "google_indexing";
 
 export type BrandStatus = "hot" | "cooling" | "removed";
 
