@@ -81,6 +81,11 @@ export interface Database {
           last_rebuild_by: string | null;
           indexed_pages: number | null;
           indexed_pages_at: string | null;
+          affiliate_url: string | null;
+          affiliate_status: string | null;
+          affiliate_detail: string | null;
+          affiliate_offer: string | null;
+          affiliate_checked_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -103,6 +108,11 @@ export interface Database {
           last_rebuild_by?: string | null;
           indexed_pages?: number | null;
           indexed_pages_at?: string | null;
+          affiliate_url?: string | null;
+          affiliate_status?: string | null;
+          affiliate_detail?: string | null;
+          affiliate_offer?: string | null;
+          affiliate_checked_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -125,6 +135,11 @@ export interface Database {
           last_rebuild_by?: string | null;
           indexed_pages?: number | null;
           indexed_pages_at?: string | null;
+          affiliate_url?: string | null;
+          affiliate_status?: string | null;
+          affiliate_detail?: string | null;
+          affiliate_offer?: string | null;
+          affiliate_checked_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };

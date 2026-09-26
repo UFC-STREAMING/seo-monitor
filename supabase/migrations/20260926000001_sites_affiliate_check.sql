@@ -1,0 +1,1 @@
+alter table public.sites add column if not exists affiliate_url text, add column if not exists affiliate_status text, add column if not exists affiliate_detail text, add column if not exists affiliate_offer text, add column if not exists affiliate_checked_at timestamptz;

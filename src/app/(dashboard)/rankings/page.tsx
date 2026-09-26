@@ -48,6 +48,13 @@ interface EmdRow {
   indexed_pages: number | null;
   cf_account: string | null;
   hosting: string | null;
+  affiliate: {
+    url: string | null;
+    status: string | null;
+    detail: string | null;
+    offer: string | null;
+    checked_at: string | null;
+  };
   purchased_at: string | null;
   keyword: string | null;
   keyword_id: string | null;
@@ -349,6 +356,7 @@ export default function RankingsPage() {
                   <TableHead>Domaine</TableHead>
                   <TableHead className="w-24">Achat le</TableHead>
                   <TableHead className="w-28">Hébergeur</TableHead>
+                  <TableHead className="min-w-64">Lien affilié</TableHead>
                   <TableHead>Mot-clé principal</TableHead>
                   <TableHead className="w-16">Pays</TableHead>
                   <TableHead className="w-20">Position</TableHead>
@@ -558,6 +566,35 @@ function EmdTableRow({
           <Badge className="bg-orange-500 hover:bg-orange-500 text-white text-xs">Cloudflare</Badge>
         ) : (
           <Badge variant="outline" className="text-xs">{row.hosting ?? "?"}</Badge>
+        )}
+      </TableCell>
+      <TableCell className="max-w-72">
+        {/* Lien affiché en TEXTE, jamais cliquable : ouvrir un tracker = clic fantôme facturé */}
+        <div className="flex items-center gap-2">
+          {row.affiliate.status === "ok" ? (
+            <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">Valide</Badge>
+          ) : row.affiliate.status === "pending" ? (
+            <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-xs">À vérifier</Badge>
+          ) : row.affiliate.status === "ko" ? (
+            <Badge className="bg-red-600 hover:bg-red-600 text-white text-xs">KO</Badge>
+          ) : (
+            <Badge variant="outline" className="text-xs">jamais</Badge>
+          )}
+          {row.affiliate.url && (
+            <button
+              type="button"
+              title={`Copier : ${row.affiliate.url}`}
+              className="truncate font-mono text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => navigator.clipboard.writeText(row.affiliate.url ?? "")}
+            >
+              {row.affiliate.url.replace(/^https?:\/\/(www\.)?/, "")}
+            </button>
+          )}
+        </div>
+        {row.affiliate.detail && (
+          <div className="mt-0.5 text-xs text-muted-foreground" title={row.affiliate.offer ?? undefined}>
+            {row.affiliate.detail}
+          </div>
         )}
       </TableCell>
       <TableCell>

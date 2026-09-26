@@ -19,7 +19,7 @@ export async function GET() {
   // Sites EMD + à classer
   const { data: sites, error: sitesErr } = await supabase
     .from("sites")
-    .select("id, domain, category, site_type, cf_account, hosting, created_at, is_active, serp_tracking_enabled, location_code, last_rebuild_at, last_rebuild_reason, last_rebuild_by, indexed_pages")
+    .select("id, domain, category, site_type, cf_account, hosting, created_at, affiliate_url, affiliate_status, affiliate_detail, affiliate_offer, affiliate_checked_at, is_active, serp_tracking_enabled, location_code, last_rebuild_at, last_rebuild_reason, last_rebuild_by, indexed_pages")
     .in("category", ["emd", "other"])
     .eq("user_id", user.id)
     .order("domain");
@@ -113,6 +113,13 @@ export async function GET() {
       serp_tracking_enabled: site.serp_tracking_enabled,
       cf_account: site.cf_account,
       hosting: site.hosting ?? null,
+      affiliate: {
+        url: site.affiliate_url ?? null,
+        status: site.affiliate_status ?? null,
+        detail: site.affiliate_detail ?? null,
+        offer: site.affiliate_offer ?? null,
+        checked_at: site.affiliate_checked_at ?? null,
+      },
       // Date d'achat réelle (registrar) sinon date d'entrée dans seo-monitor
       purchased_at: fin?.purchase_date ?? site.created_at?.slice(0, 10) ?? null,
       keyword: kw?.keyword ?? null,
