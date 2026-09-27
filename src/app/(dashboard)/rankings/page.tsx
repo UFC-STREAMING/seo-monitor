@@ -27,6 +27,7 @@ import {
   DollarSign,
   PiggyBank,
   Search,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -247,7 +248,7 @@ export default function RankingsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Erreur");
       if (json.balance_error) {
-        toast.error("Solde DataForSEO épuisé — check incomplet");
+        toast.error("Crédit Semscraper épuisé — check incomplet");
       } else {
         toast.success(
           `Check terminé : ${json.found}/${json.checked} dans le top 100 (${json.total_cost_usd} €)`
@@ -260,6 +261,38 @@ export default function RankingsPage() {
       setChecking(null);
     }
   }
+
+  async function runAffiliateCheck() {
+    setChecking("affiliate");
+    try {
+      const res = await fetch("/api/affiliate/check", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Erreur");
+      toast.success(`Liens vérifiés : ${json.ok} valides, ${json.pending} à vérifier, ${json.ko} KO`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erreur vérification liens");
+    } finally {
+      setChecking(null);
+    }
+  }
+
+  const affiliateIssues = useMemo(() => {
+    if (!data) return { toFix: [] as Array<{ row: EmdRow; action: string }>, offline: [] as string[] };
+    const active = data.emd.filter((r) => r.is_active);
+    const offline = active
+      .filter((r) => r.affiliate.detail === "Site injoignable")
+      .map((r) => r.domain);
+    const toFix = active
+      .filter(
+        (r) =>
+          (r.affiliate.status === "ko" || r.affiliate.status === "pending") &&
+          r.affiliate.detail !== "Site injoignable"
+      )
+      .map((row) => ({ row, action: affiliateAction(row.affiliate.detail ?? "") }))
+      .sort((a, b) => (a.row.affiliate.status === "ko" ? 0 : 1) - (b.row.affiliate.status === "ko" ? 0 : 1));
+    return { toFix, offline };
+  }, [data]);
 
   const filteredToClassify = useMemo(() => {
     if (!data) return [];
@@ -285,10 +318,16 @@ export default function RankingsPage() {
             Suivi hebdo des positions (Semscraper, lundi 7h) — tri par date d’achat — mot-clé et coûts éditables inline
           </p>
         </div>
-        <Button onClick={() => runCheck()} disabled={checking !== null}>
-          <RefreshCw className={`mr-2 h-4 w-4 ${checking === "all" ? "animate-spin" : ""}`} />
-          Check maintenant
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => runAffiliateCheck()} disabled={checking !== null}>
+            <Link2 className={`mr-2 h-4 w-4 ${checking === "affiliate" ? "animate-pulse" : ""}`} />
+            Vérifier les liens
+          </Button>
+          <Button onClick={() => runCheck()} disabled={checking !== null}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${checking === "all" ? "animate-spin" : ""}`} />
+            Check maintenant
+          </Button>
+        </div>
       </div>
 
       {/* Stat cards */}
@@ -344,6 +383,47 @@ export default function RankingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Liens affiliés à régler */}
+      {(affiliateIssues.toFix.length > 0 || affiliateIssues.offline.length > 0) && (
+        <Card className="border-red-200 dark:border-red-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Link2 className="h-4 w-4" /> Liens affiliés à régler ({affiliateIssues.toFix.length})
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Vérifiés chaque jour à 6h40 UTC sans jamais ouvrir le tracker (bouton du CTA → offre
+              Everflow → approbation → sub1).
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {affiliateIssues.toFix.map(({ row, action }) => (
+              <div
+                key={row.site_id}
+                className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[14rem_6rem_1fr_1fr] md:items-center"
+              >
+                <span className="font-medium truncate">{row.domain}</span>
+                <span>
+                  {row.affiliate.status === "ko" ? (
+                    <Badge className="bg-red-600 hover:bg-red-600 text-white text-xs">KO</Badge>
+                  ) : (
+                    <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-xs">À vérifier</Badge>
+                  )}
+                </span>
+                <span className="text-muted-foreground" title={row.affiliate.offer ?? undefined}>
+                  {row.affiliate.detail}
+                </span>
+                <span className="font-medium">→ {action}</span>
+              </div>
+            ))}
+            {affiliateIssues.offline.length > 0 && (
+              <p className="pt-2 text-xs text-muted-foreground">
+                Pas encore en ligne ({affiliateIssues.offline.length}) : {affiliateIssues.offline.join(", ")}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Table EMD */}
       <Card>
@@ -728,4 +808,18 @@ function FinanceCell({
       />
     </TableCell>
   );
+}
+
+/** Action concrète à mener selon le diagnostic du lien affilié. */
+function affiliateAction(detail: string): string {
+  const net = detail.match(/chez (\w+)/)?.[1];
+  if (/Pas approuvé/.test(detail)) return `Demander l’approbation chez ${net ?? "le réseau"}`;
+  if (/Offre (paused|inactive|expired)/i.test(detail)) return "Offre coupée : trouver une offre de remplacement";
+  if (/503/.test(detail)) return "Faire approuver l’offre, puis brancher le tracker";
+  if (/Aucun bouton/.test(detail)) return "Aucune offre branchée : trouver une offre et brancher les boutons";
+  if (/404|ne redirige pas|boucle|invalide|injoignable|répond/.test(detail)) return "Lien cassé : fournir le lien affilié à rebrancher";
+  if (/sub1/.test(detail)) return "Corriger le sub1 (sinon revenus non attribués)";
+  if (/plus dans ton catalogue/.test(detail)) return "Vérifier que l’offre existe encore chez le réseau";
+  if (/Lien direct/.test(detail)) return "Vérifier l’approbation à la main (hors API)";
+  return "À examiner";
 }
