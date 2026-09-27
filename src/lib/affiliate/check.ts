@@ -2,7 +2,8 @@
 // tracker. Chaque requête vers clickrtrckr/diginear/premierdiscountlink… est
 // un clic facturé (incident « clics fantômes » de septembre 2026).
 //
-// 1. GET https://<domaine>/go/ en redirect:"manual" → on lit la cible dans
+// 1. On repère le chemin des boutons sur la home (/go/, /goto/officiel/…),
+//    puis GET de ce chemin en redirect:"manual" → on lit la cible dans
 //    l'en-tête Location (ou dans la meta refresh / location.replace si le /go/
 //    est une page HTML). La cible n'est jamais requêtée.
 // 2. On retrouve l'offre Everflow par le chemin du lien (/<aff>/<offre>/) dans
@@ -38,6 +39,15 @@ interface OfferInfo {
   offerStatus: string;
   affiliateStatus: string | null;
 }
+
+// Domaines de tracking Everflow connus → réseau
+const EVERFLOW_TRACKING_HOSTS: Record<string, string> = {
+  "clickrtrckr.com": "MediaScaler",
+  "treejammer.com": "MediaScaler",
+  "diginear.com": "SmartAdv",
+  "premierdiscountlink.com": "SmashLoud",
+  "primesavingslink.com": "SmashLoud",
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -102,19 +112,53 @@ export async function loadEverflowOffers(): Promise<Map<string, OfferInfo>> {
   return index;
 }
 
-/** Lit la cible du /go/ sans la suivre. */
-async function readGoTarget(
-  domain: string
-): Promise<{ status: number | null; target: string | null }> {
+const UA = "Mozilla/5.0 (seo-monitor affiliate check)";
+const CTA_HINT = /go|out|visit|offi|buy|order|link|kaufen|comprar|acheter|bonus|play|shop/i;
+
+/**
+ * Chemin réellement utilisé par les boutons de la page d'accueil (/go/,
+ * /goto/officiel/, /go/psf…) : le lien interne le plus fréquent qui ressemble
+ * à un CTA. null = aucun bouton d'affiliation sur la page.
+ */
+async function findCtaPath(domain: string): Promise<string | null | undefined> {
   try {
-    const res = await fetch(`https://${domain}/go/`, {
+    const res = await fetch(`https://${domain}/`, {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return undefined;
+    const html = await res.text();
+    const bare = domain.replace(/^www\./, "").replace(/\./g, "\\.");
+    const counts = new Map<string, number>();
+    for (const m of html.matchAll(/href=["']([^"'#]+)["']/gi)) {
+      const href = m[1].replace(new RegExp(`^https?://(www\\.)?${bare}`, "i"), "");
+      if (!href.startsWith("/") || href.startsWith("//")) continue;
+      const pathOnly = href.split("?")[0];
+      if (/\.[a-z0-9]{2,5}$/i.test(pathOnly) || !CTA_HINT.test(pathOnly)) continue;
+      counts.set(href, (counts.get(href) ?? 0) + 1);
+    }
+    const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    return best ? best[0] : null;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Lit la cible du CTA sans la suivre. */
+async function readGoTarget(
+  domain: string,
+  ctaPath: string
+): Promise<{ status: number | null; target: string | null }> {
+  const url = `https://${domain}${ctaPath}`;
+  try {
+    const res = await fetch(url, {
       redirect: "manual",
-      headers: { "User-Agent": "Mozilla/5.0 (seo-monitor affiliate check)" },
+      headers: { "User-Agent": UA },
       signal: AbortSignal.timeout(10_000),
     });
     const loc = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && loc) {
-      return { status: res.status, target: new URL(loc, `https://${domain}/go/`).toString() };
+      return { status: res.status, target: new URL(loc, url).toString() };
     }
     if (res.status === 200) {
       const html = (await res.text()).slice(0, 20_000);
@@ -138,18 +182,23 @@ export async function checkAffiliateLink(
   offers: Map<string, OfferInfo>
 ): Promise<AffiliateCheck> {
   const base = { domain, target_url: null, network: null, offer_id: null, offer_name: null };
-  const { status, target } = await readGoTarget(domain);
+  const cta = await findCtaPath(domain);
+  if (cta === undefined) return { ...base, verdict: "ko", detail: "Site injoignable" };
+  if (cta === null) {
+    return { ...base, verdict: "ko", detail: "Aucun bouton d'affiliation sur la page d'accueil" };
+  }
+  const { status, target } = await readGoTarget(domain, cta);
 
-  if (status === null) return { ...base, verdict: "ko", detail: "Site injoignable" };
+  if (status === null) return { ...base, verdict: "ko", detail: `${cta} injoignable` };
   if (!target) {
     const why =
       status === 503
-        ? "/go/ en 503 : tracker pas encore branché"
+        ? `${cta} en 503 : tracker pas encore branché`
         : status === 404
-          ? "/go/ introuvable (404)"
+          ? `${cta} introuvable (404)`
           : status === 200
-            ? "/go/ ne redirige pas (renvoie une page)"
-            : `/go/ répond ${status}`;
+            ? `${cta} ne redirige pas (renvoie une page)`
+            : `${cta} répond ${status}`;
     return { ...base, verdict: "ko", detail: why };
   }
 
@@ -160,16 +209,19 @@ export async function checkAffiliateLink(
     return { ...base, verdict: "ko", target_url: target, detail: "Cible du /go/ invalide" };
   }
   if (targetHost.replace(/^www\./, "") === domain.replace(/^www\./, "")) {
-    return { ...base, verdict: "ko", target_url: target, detail: "/go/ boucle sur le site" };
+    return { ...base, verdict: "ko", target_url: target, detail: `${cta} boucle sur le site` };
   }
 
   const offer = offers.get(trackerKey(target) ?? "");
   if (!offer) {
+    const everflowNet = EVERFLOW_TRACKING_HOSTS[targetHost.replace(/^www\./, "")];
     return {
       ...base,
       verdict: "pending",
       target_url: target,
-      detail: `Lien hors Everflow (${targetHost}) : statut non vérifiable par API`,
+      detail: everflowNet
+        ? `Redirige vers ${everflowNet}, mais l'offre n'est plus dans ton catalogue (retirée ou autre compte) : à vérifier`
+        : `Lien direct marchand/autre réseau (${targetHost}) : redirige bien, approbation non vérifiable par API`,
     };
   }
 
