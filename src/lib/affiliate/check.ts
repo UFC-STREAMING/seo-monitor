@@ -38,6 +38,14 @@ interface OfferInfo {
   name: string;
   offerStatus: string;
   affiliateStatus: string | null;
+  trackingUrl: string | null;
+}
+
+export interface OfferCatalog {
+  /** Offres indexées par chemin de tracker (/<aff>/<offre>/). */
+  byTracker: Map<string, OfferInfo>;
+  /** Toutes les offres, pour chercher une alternative approuvée. */
+  all: OfferInfo[];
 }
 
 // Domaines de tracking Everflow connus → réseau
@@ -68,8 +76,9 @@ function trackerKey(url: string): string | null {
 }
 
 /** Catalogue des offres des 3 réseaux Everflow, indexé par chemin de tracker. */
-export async function loadEverflowOffers(): Promise<Map<string, OfferInfo>> {
+export async function loadEverflowOffers(): Promise<OfferCatalog> {
   const index = new Map<string, OfferInfo>();
+  const all: OfferInfo[] = [];
   for (const net of EVERFLOW_NETWORKS) {
     const key = process.env[net.tokenEnv];
     if (!key) continue;
@@ -96,20 +105,86 @@ export async function loadEverflowOffers(): Promise<Map<string, OfferInfo>> {
       };
       const offers = json.offers ?? [];
       for (const o of offers) {
-        const k = o.tracking_url ? trackerKey(o.tracking_url) : null;
-        if (!k) continue;
-        index.set(k, {
+        const info: OfferInfo = {
           network: net.key,
           offerId: o.network_offer_id,
           name: o.name,
           offerStatus: o.offer_status,
           affiliateStatus: o.relationship?.offer_affiliate_status ?? null,
-        });
+          trackingUrl: o.tracking_url || null,
+        };
+        all.push(info);
+        const k = o.tracking_url ? trackerKey(o.tracking_url) : null;
+        if (k) index.set(k, info);
       }
       if (offers.length < PAGE_SIZE) break;
     }
   }
-  return index;
+  return { byTracker: index, all };
+}
+
+const normBrand = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
+// Everflow écrit « UK » pour le Royaume-Uni
+const toEverflowCountry = (iso: string) => (iso.toUpperCase() === "GB" ? "UK" : iso.toUpperCase());
+
+const countriesCache = new Map<string, string[]>();
+
+/** Pays autorisés d'une offre (ruleset de la relation affilié), lus par l'API. */
+async function offerCountries(offer: OfferInfo): Promise<string[]> {
+  const cacheKey = `${offer.network}#${offer.offerId}`;
+  const cached = countriesCache.get(cacheKey);
+  if (cached) return cached;
+  const net = EVERFLOW_NETWORKS.find((n) => n.key === offer.network);
+  const key = net ? process.env[net.tokenEnv] : undefined;
+  let countries: string[] = [];
+  if (key) {
+    await sleep(250);
+    const res = await fetch(`${EFLOW_API}/offers/${offer.offerId}`, {
+      headers: { "X-Eflow-API-Key": key },
+    });
+    if (res.ok) {
+      const json = JSON.parse((await res.text()).replace(/[\u0000-\u001f]/g, " ")) as {
+        relationship?: { ruleset?: { countries?: Array<{ country_code?: string }> } };
+      };
+      countries = (json.relationship?.ruleset?.countries ?? [])
+        .map((c) => (c.country_code ?? "").toUpperCase())
+        .filter(Boolean);
+    }
+  }
+  countriesCache.set(cacheKey, countries);
+  return countries;
+}
+
+/**
+ * Offre de remplacement : même marque (mot-clé principal du site), active,
+ * APPROUVÉE pour nous, et dont le ruleset couvre le pays du site.
+ * Ne change rien en prod : c'est une proposition affichée sur le dashboard.
+ */
+export async function findApprovedAlternative(
+  brand: string,
+  countryIso: string | null,
+  catalog: OfferCatalog,
+  exclude?: { network: string | null; offerId: number | null }
+): Promise<string | null> {
+  const b = normBrand(brand);
+  if (b.length < 4) return null;
+  const candidates = catalog.all.filter(
+    (o) =>
+      o.offerStatus === "active" &&
+      o.affiliateStatus === "approved" &&
+      o.trackingUrl &&
+      normBrand(o.name).includes(b) &&
+      !(exclude && o.network === exclude.network && o.offerId === exclude.offerId)
+  );
+  if (!candidates.length) return null;
+  const country = countryIso ? toEverflowCountry(countryIso) : null;
+  for (const o of candidates) {
+    const countries = await offerCountries(o);
+    if (!country || countries.includes(country)) {
+      return `${o.network} #${o.offerId} « ${o.name.slice(0, 70)} »${country ? ` — approuvée, couvre ${country}` : " — approuvée"}`;
+    }
+  }
+  return null;
 }
 
 const UA = "Mozilla/5.0 (seo-monitor affiliate check)";
@@ -261,20 +336,45 @@ export async function runAffiliateChecks(
 ): Promise<AffiliateCheck[]> {
   const { data: sites, error } = await supabase
     .from("sites")
-    .select("id, domain")
+    .select("id, domain, location_code, keywords(keyword, is_primary, location_code)")
     .eq("category", "emd")
     .eq("is_active", true);
   if (error) throw new Error(`sites fetch: ${error.message}`);
 
-  const offers = await loadEverflowOffers();
+  const { data: locations } = await supabase.from("locations").select("code, country_iso");
+  const isoByCode = new Map((locations ?? []).map((l) => [l.code, l.country_iso]));
+
+  const catalog = await loadEverflowOffers();
   const results: AffiliateCheck[] = [];
   const list = sites ?? [];
   for (let i = 0; i < list.length; i += 8) {
     const batch = list.slice(i, i + 8);
-    const checks = await Promise.all(batch.map((s) => checkAffiliateLink(s.domain, offers)));
+    const checks = await Promise.all(
+      batch.map((s) => checkAffiliateLink(s.domain, catalog.byTracker))
+    );
     for (let j = 0; j < batch.length; j++) {
       const c = checks[j];
       results.push(c);
+
+      // Lien KO ou offre disparue du catalogue → chercher une offre approuvée ailleurs
+      let suggestion: string | null = null;
+      const offerGone = c.verdict === "pending" && c.detail.startsWith("Redirige vers");
+      if ((c.verdict === "ko" && c.detail !== "Site injoignable") || offerGone) {
+        const kws = (batch[j].keywords ?? []) as Array<{
+          keyword: string;
+          is_primary: boolean;
+          location_code: number | null;
+        }>;
+        const primary = kws.find((k) => k.is_primary) ?? kws[0];
+        const brand = primary?.keyword ?? batch[j].domain.split(".")[0];
+        const code = primary?.location_code ?? batch[j].location_code;
+        const iso = code ? isoByCode.get(code) ?? null : null;
+        suggestion = await findApprovedAlternative(brand, iso, catalog, {
+          network: c.network,
+          offerId: c.offer_id,
+        });
+      }
+
       await supabase
         .from("sites")
         .update({
@@ -284,6 +384,7 @@ export async function runAffiliateChecks(
           affiliate_offer: c.offer_name
             ? `${c.network} #${c.offer_id} — ${c.offer_name}`
             : null,
+          affiliate_suggestion: suggestion,
           affiliate_checked_at: new Date().toISOString(),
         })
         .eq("id", batch[j].id);

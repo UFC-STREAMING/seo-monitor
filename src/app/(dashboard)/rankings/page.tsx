@@ -54,6 +54,7 @@ interface EmdRow {
     status: string | null;
     detail: string | null;
     offer: string | null;
+    suggestion: string | null;
     checked_at: string | null;
   };
   purchased_at: string | null;
@@ -413,7 +414,14 @@ export default function RankingsPage() {
                 <span className="text-muted-foreground" title={row.affiliate.offer ?? undefined}>
                   {row.affiliate.detail}
                 </span>
-                <span className="font-medium">→ {action}</span>
+                <span className="font-medium">
+                  → {action}
+                  {row.affiliate.suggestion && (
+                    <span className="mt-0.5 block text-xs font-normal text-emerald-700 dark:text-emerald-400">
+                      ✓ Offre approuvée dispo : {row.affiliate.suggestion}
+                    </span>
+                  )}
+                </span>
               </div>
             ))}
             {affiliateIssues.offline.length > 0 && (

@@ -85,6 +85,7 @@ export interface Database {
           affiliate_status: string | null;
           affiliate_detail: string | null;
           affiliate_offer: string | null;
+          affiliate_suggestion: string | null;
           affiliate_checked_at: string | null;
           created_at: string;
           updated_at: string;
@@ -112,6 +113,7 @@ export interface Database {
           affiliate_status?: string | null;
           affiliate_detail?: string | null;
           affiliate_offer?: string | null;
+          affiliate_suggestion?: string | null;
           affiliate_checked_at?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -139,6 +141,7 @@ export interface Database {
           affiliate_status?: string | null;
           affiliate_detail?: string | null;
           affiliate_offer?: string | null;
+          affiliate_suggestion?: string | null;
           affiliate_checked_at?: string | null;
           created_at?: string;
           updated_at?: string;
