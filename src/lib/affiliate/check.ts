@@ -127,6 +127,8 @@ const normBrand = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z
 // Everflow écrit « UK » pour le Royaume-Uni
 const toEverflowCountry = (iso: string) => (iso.toUpperCase() === "GB" ? "UK" : iso.toUpperCase());
 
+const NETWORK_RANK: Record<string, number> = { mediascaler: 0, smartadv: 1, smashloud: 2 };
+
 const countriesCache = new Map<string, string[]>();
 
 /** Pays autorisés d'une offre (ruleset de la relation affilié), lus par l'API. */
@@ -177,11 +179,15 @@ export async function findApprovedAlternative(
       !(exclude && o.network === exclude.network && o.offerId === exclude.offerId)
   );
   if (!candidates.length) return null;
+  // Priorité Leo : MediaScaler > SmartAdv > SmashLoud. SmashLoud en dernier recours :
+  // ses landers sont géo-bloqués, impossibles à scraper hors du pays ciblé.
+  candidates.sort((a, b) => (NETWORK_RANK[a.network] ?? 9) - (NETWORK_RANK[b.network] ?? 9));
   const country = countryIso ? toEverflowCountry(countryIso) : null;
   for (const o of candidates) {
     const countries = await offerCountries(o);
     if (!country || countries.includes(country)) {
-      return `${o.network} #${o.offerId} « ${o.name.slice(0, 70)} »${country ? ` — approuvée, couvre ${country}` : " — approuvée"}`;
+      const warn = o.network === "smashloud" ? " (SmashLoud : seul réseau dispo, lander géo-bloqué)" : "";
+      return `${o.network} #${o.offerId} « ${o.name.slice(0, 70)} »${country ? ` — approuvée, couvre ${country}` : " — approuvée"}${warn}`;
     }
   }
   return null;
