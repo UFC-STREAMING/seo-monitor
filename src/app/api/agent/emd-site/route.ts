@@ -19,7 +19,8 @@ export const maxDuration = 60;
 //   "renewal_price": 12.99,
 //   "renewal_date": "2027-07-13",
 //   "registrar": "dynadot",
-//   "hosting": "cloudflare" | "hostinger",  // défaut cloudflare
+//   "hosting": "cloudflare" | "hostinger" | "alexhost",  // défaut cloudflare
+//   "only_if_new": true,              // ne touche jamais un domaine déjà connu
 //   "niche": "nutra" | "casino",
 //   "notes": "offre Everflow XYZ"
 // }
@@ -72,8 +73,9 @@ export async function POST(request: NextRequest) {
     locationCode = loc.code;
   }
 
-  const hosting =
-    body.hosting === "hostinger" || body.hosting === "cloudflare" ? body.hosting : null;
+  const hosting = ["hostinger", "cloudflare", "alexhost"].includes(String(body.hosting))
+    ? String(body.hosting)
+    : null;
   const keyword = body.keyword ? String(body.keyword).trim().toLowerCase() : null;
   const niche = body.niche === "casino" ? "casino" : "nutra";
 
@@ -83,6 +85,13 @@ export async function POST(request: NextRequest) {
     .select("id")
     .eq("domain", domain)
     .maybeSingle();
+
+  // only_if_new : utilisé par la synchro automatique des achats. Un domaine déjà
+  // connu n'est JAMAIS modifié (sinon on réactiverait un site retiré du suivi,
+  // redirigé ou supprimé).
+  if (existing && body.only_if_new) {
+    return NextResponse.json({ success: true, skipped: "déjà connu", domain });
+  }
 
   let siteId: string;
   if (existing) {
