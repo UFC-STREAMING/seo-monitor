@@ -28,6 +28,7 @@ import {
   PiggyBank,
   Search,
   Link2,
+  Rocket,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -195,6 +196,97 @@ function Sparkline({ history }: { history: HistoryPoint[] }) {
         <circle cx={x(lastIdx)} cy={y(lastVal)} r="2.5" fill="currentColor" />
       )}
     </svg>
+  );
+}
+
+// ── EMD à lancer ─────────────────────────────────────────────────────────────
+
+interface EmdOpportunity {
+  brand: string;
+  offer: string;
+  network: string;
+  offerStatus: string;
+  country: string;
+  conversions: number;
+  revenueUsd: number;
+  sources: { host: string; revenueUsd: number }[];
+  existingEmds: string[];
+}
+
+function EmdOpportunitiesCard() {
+  const [rows, setRows] = useState<EmdOpportunity[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/emd-opportunities")
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((j) => setRows(j.opportunities))
+      .catch(() => setRows([]));
+  }, []);
+
+  if (rows === null) {
+    return (
+      <Card>
+        <CardContent className="py-4 text-sm text-muted-foreground">
+          Chargement des ventes Everflow…
+        </CardContent>
+      </Card>
+    );
+  }
+  if (rows.length === 0) return null;
+
+  const visible = showAll ? rows : rows.slice(0, 15);
+
+  return (
+    <Card className="border-emerald-200 dark:border-emerald-900">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Rocket className="h-4 w-4" /> EMD à lancer
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Offre × pays qui ont vendu via les sites expirés sur 90 jours (site d&apos;origine = referer
+          Everflow). Les ventes faites par les EMD sont exclues.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-1.5">
+        {visible.map((o) => (
+          <div
+            key={`${o.network}|${o.offer}|${o.country}`}
+            className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[11rem_8rem_7rem_1fr_14rem] md:items-center"
+          >
+            <span className="font-medium truncate" title={o.offer}>
+              {o.brand}
+              {o.offerStatus !== "active" && (
+                <Badge className="ml-2 bg-red-600 hover:bg-red-600 text-white text-xs">{o.offerStatus}</Badge>
+              )}
+            </span>
+            <span>{o.country}</span>
+            <span className="font-medium">
+              {o.revenueUsd.toLocaleString("fr-FR")} $
+              <span className="block text-xs font-normal text-muted-foreground">
+                {o.conversions} ventes · {o.network}
+              </span>
+            </span>
+            <span className="text-muted-foreground truncate" title={o.sources.map((s) => `${s.host} ${s.revenueUsd} $`).join("\n")}>
+              {o.sources.slice(0, 3).map((s) => s.host).join(", ")}
+              {o.sources.length > 3 && ` +${o.sources.length - 3}`}
+            </span>
+            <span className="text-xs">
+              {o.existingEmds.length > 0 ? (
+                <span className="text-muted-foreground">EMD : {o.existingEmds.join(", ")}</span>
+              ) : (
+                <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">Aucun EMD</Badge>
+              )}
+            </span>
+          </div>
+        ))}
+        {rows.length > 15 && (
+          <Button variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "Réduire" : `Voir les ${rows.length}`}
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -432,6 +524,8 @@ export default function RankingsPage() {
           </CardContent>
         </Card>
       )}
+
+      <EmdOpportunitiesCard />
 
       {/* Table EMD */}
       <Card>
