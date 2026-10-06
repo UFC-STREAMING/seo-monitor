@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { computeEmdOpportunities } from "@/lib/everflow/opportunities";
+import { getEmdBoard } from "@/lib/emd/board";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
-// Offres × pays qui vendent via les sites expirés (referer Everflow), avec les
-// EMD déjà possédés pour la marque. Encart « EMD à lancer » de /rankings.
+// Encart « EMD à lancer » de /rankings : marque × pays avec ventes (Everflow,
+// 90 j), impressions des fiches produit (Search Console, 28 j) et EMD
+// concurrents dans le top 10 Google du pays. Calcul mis en cache 24 h.
 // Auth : session dashboard OU Bearer CRON_SECRET (agent Hermes EMD).
 export async function GET(request: NextRequest) {
   const isCron =
@@ -23,19 +23,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const days = Math.min(365, Math.max(7, Number(request.nextUrl.searchParams.get("days")) || 90));
-
   try {
-    const { data: sites, error } = await createAdminClient()
-      .from("sites")
-      .select("domain")
-      .eq("category", "emd");
-    if (error) throw new Error(error.message);
-    const opportunities = await computeEmdOpportunities(
-      (sites ?? []).map((s) => s.domain),
-      days
-    );
-    return NextResponse.json({ days, opportunities });
+    return NextResponse.json({ rows: await getEmdBoard() });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

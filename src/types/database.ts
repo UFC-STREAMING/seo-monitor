@@ -971,7 +971,17 @@ export interface Database {
     };
 
     Functions: {
-      [_ in never]: never;
+      emd_brand_impressions: {
+        Args: { p_days?: number };
+        Returns: {
+          host: string;
+          slug: string;
+          country: string;
+          impressions: number;
+          clicks: number;
+          top_query: string;
+        }[];
+      };
     };
 
     Enums: {

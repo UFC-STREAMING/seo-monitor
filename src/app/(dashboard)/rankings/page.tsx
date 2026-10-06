@@ -201,41 +201,87 @@ function Sparkline({ history }: { history: HistoryPoint[] }) {
 
 // ── EMD à lancer ─────────────────────────────────────────────────────────────
 
-interface EmdOpportunity {
+interface EmdBoardRow {
   brand: string;
-  offer: string;
-  network: string;
-  offerStatus: string;
   country: string;
-  conversions: number;
-  revenueUsd: number;
-  sources: { host: string; revenueUsd: number }[];
-  existingEmds: string[];
+  countryIso: string;
+  tld: string;
+  sales: {
+    revenueUsd: number;
+    conversions: number;
+    network: string;
+    offer: string;
+    offerStatus: string;
+    sources: { host: string; revenueUsd: number }[];
+  } | null;
+  impressions: {
+    impressions: number;
+    clicks: number;
+    topQuery: string;
+    sources: { host: string; impressions: number }[];
+  } | null;
+  ownEmd: string | null;
+  serpBrandDomains: string[] | null;
+  serpError?: string;
+}
+
+function SerpCell({ row }: { row: EmdBoardRow }) {
+  if (row.ownEmd) return <span className="text-muted-foreground">On a : {row.ownEmd}</span>;
+  if (row.serpBrandDomains === null) {
+    return <span className="text-muted-foreground">{row.serpError ?? "SERP non vérifiée"}</span>;
+  }
+  if (row.serpBrandDomains.length === 0) {
+    return (
+      <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">
+        Place libre {row.tld}
+      </Badge>
+    );
+  }
+  return (
+    <span className="text-amber-700 dark:text-amber-400" title={row.serpBrandDomains.join("\n")}>
+      EMD en top 10 : {row.serpBrandDomains.slice(0, 2).join(", ")}
+      {row.serpBrandDomains.length > 2 && ` +${row.serpBrandDomains.length - 2}`}
+    </span>
+  );
 }
 
 function EmdOpportunitiesCard() {
-  const [rows, setRows] = useState<EmdOpportunity[] | null>(null);
+  const [rows, setRows] = useState<EmdBoardRow[] | null>(null);
+  const [sortBy, setSortBy] = useState<"sales" | "impressions">("sales");
+  const [freeOnly, setFreeOnly] = useState(false);
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     fetch("/api/emd-opportunities")
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((j) => setRows(j.opportunities))
+      .then((j) => setRows(j.rows))
       .catch(() => setRows([]));
   }, []);
+
+  const sorted = useMemo(() => {
+    const list = (rows ?? []).filter(
+      (r) => (sortBy === "sales" ? r.sales : r.impressions) &&
+        (!freeOnly || (!r.ownEmd && r.serpBrandDomains?.length === 0))
+    );
+    return list.sort((a, b) =>
+      sortBy === "sales"
+        ? (b.sales?.revenueUsd ?? 0) - (a.sales?.revenueUsd ?? 0)
+        : (b.impressions?.impressions ?? 0) - (a.impressions?.impressions ?? 0)
+    );
+  }, [rows, sortBy, freeOnly]);
 
   if (rows === null) {
     return (
       <Card>
         <CardContent className="py-4 text-sm text-muted-foreground">
-          Chargement des ventes Everflow…
+          Chargement des ventes, impressions et SERP…
         </CardContent>
       </Card>
     );
   }
   if (rows.length === 0) return null;
 
-  const visible = showAll ? rows : rows.slice(0, 15);
+  const visible = showAll ? sorted : sorted.slice(0, 15);
 
   return (
     <Card className="border-emerald-200 dark:border-emerald-900">
@@ -244,45 +290,78 @@ function EmdOpportunitiesCard() {
           <Rocket className="h-4 w-4" /> EMD à lancer
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Offre × pays qui ont vendu via les sites expirés sur 90 jours (site d&apos;origine = referer
-          Everflow). Les ventes faites par les EMD sont exclues.
+          Marque × pays des sites expirés : ventes Everflow (90 j), impressions Search Console des
+          fiches produit (28 j), et EMD déjà présents dans le top 10 Google du pays (mis à jour 1×/jour).
         </p>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button size="sm" variant={sortBy === "sales" ? "default" : "outline"} onClick={() => setSortBy("sales")}>
+            Par ventes
+          </Button>
+          <Button size="sm" variant={sortBy === "impressions" ? "default" : "outline"} onClick={() => setSortBy("impressions")}>
+            Par impressions
+          </Button>
+          <Button size="sm" variant={freeOnly ? "default" : "outline"} onClick={() => setFreeOnly((v) => !v)}>
+            Places libres seulement
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-1.5">
-        {visible.map((o) => (
-          <div
-            key={`${o.network}|${o.offer}|${o.country}`}
-            className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[11rem_8rem_7rem_1fr_14rem] md:items-center"
-          >
-            <span className="font-medium truncate" title={o.offer}>
-              {o.brand}
-              {o.offerStatus !== "active" && (
-                <Badge className="ml-2 bg-red-600 hover:bg-red-600 text-white text-xs">{o.offerStatus}</Badge>
-              )}
-            </span>
-            <span>{o.country}</span>
-            <span className="font-medium">
-              {o.revenueUsd.toLocaleString("fr-FR")} $
-              <span className="block text-xs font-normal text-muted-foreground">
-                {o.conversions} ventes · {o.network}
+        <div className="hidden px-3 text-xs text-muted-foreground md:grid md:grid-cols-[11rem_7rem_7rem_8rem_1fr_15rem]">
+          <span>Marque</span>
+          <span>Pays</span>
+          <span>Ventes 90 j</span>
+          <span>Impressions 28 j</span>
+          <span>Sites expirés</span>
+          <span>Top 10 Google</span>
+        </div>
+        {visible.map((r) => {
+          const hosts = [
+            ...new Set([
+              ...(r.sales?.sources.map((s) => s.host) ?? []),
+              ...(r.impressions?.sources.map((s) => s.host) ?? []),
+            ]),
+          ];
+          return (
+            <div
+              key={`${r.brand}|${r.countryIso}`}
+              className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[11rem_7rem_7rem_8rem_1fr_15rem] md:items-center"
+            >
+              <span className="font-medium truncate" title={r.sales?.offer ?? r.impressions?.topQuery}>
+                {r.brand}
+                {r.sales && r.sales.offerStatus !== "active" && (
+                  <Badge className="ml-2 bg-red-600 hover:bg-red-600 text-white text-xs">{r.sales.offerStatus}</Badge>
+                )}
               </span>
-            </span>
-            <span className="text-muted-foreground truncate" title={o.sources.map((s) => `${s.host} ${s.revenueUsd} $`).join("\n")}>
-              {o.sources.slice(0, 3).map((s) => s.host).join(", ")}
-              {o.sources.length > 3 && ` +${o.sources.length - 3}`}
-            </span>
-            <span className="text-xs">
-              {o.existingEmds.length > 0 ? (
-                <span className="text-muted-foreground">EMD : {o.existingEmds.join(", ")}</span>
-              ) : (
-                <Badge className="bg-emerald-600 hover:bg-emerald-600 text-white text-xs">Aucun EMD</Badge>
-              )}
-            </span>
-          </div>
-        ))}
-        {rows.length > 15 && (
+              <span>{r.country}</span>
+              <span className={r.sales ? "font-medium" : "text-muted-foreground"}>
+                {r.sales ? `${r.sales.revenueUsd.toLocaleString("fr-FR")} $` : "—"}
+                {r.sales && (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {r.sales.conversions} ventes · {r.sales.network}
+                  </span>
+                )}
+              </span>
+              <span className={r.impressions ? "font-medium" : "text-muted-foreground"}>
+                {r.impressions ? r.impressions.impressions.toLocaleString("fr-FR") : "—"}
+                {r.impressions && (
+                  <span className="block truncate text-xs font-normal text-muted-foreground" title={r.impressions.topQuery}>
+                    {r.impressions.clicks} clics · « {r.impressions.topQuery} »
+                  </span>
+                )}
+              </span>
+              <span className="text-muted-foreground truncate" title={hosts.join("\n")}>
+                {hosts.slice(0, 3).join(", ")}
+                {hosts.length > 3 && ` +${hosts.length - 3}`}
+              </span>
+              <span className="text-xs">
+                <SerpCell row={r} />
+              </span>
+            </div>
+          );
+        })}
+        {sorted.length > 15 && (
           <Button variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>
-            {showAll ? "Réduire" : `Voir les ${rows.length}`}
+            {showAll ? "Réduire" : `Voir les ${sorted.length}`}
           </Button>
         )}
       </CardContent>

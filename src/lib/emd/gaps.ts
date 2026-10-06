@@ -6,7 +6,7 @@ import { computeEmdOpportunities, type EmdOpportunity } from "@/lib/everflow/opp
 import { fetchSerpOrganic } from "@/lib/semscraper/client";
 
 // Pays Everflow (nom anglais) → ISO, langue Google, TLD à acheter.
-const COUNTRIES: Record<string, { iso: string; lang: string; tld: string }> = {
+export const COUNTRIES: Record<string, { iso: string; lang: string; tld: string }> = {
   France: { iso: "FR", lang: "fr", tld: ".fr" },
   Germany: { iso: "DE", lang: "de", tld: ".de" },
   Italy: { iso: "IT", lang: "it", tld: ".it" },
@@ -35,7 +35,7 @@ const COUNTRIES: Record<string, { iso: string; lang: string; tld: string }> = {
   Japan: { iso: "JP", lang: "ja", tld: ".jp" },
 };
 
-const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+export const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 export interface EmdGap extends EmdOpportunity {
   countryIso: string;
@@ -48,7 +48,7 @@ export interface EmdGap extends EmdOpportunity {
 }
 
 /** Un de nos EMD couvre déjà ce pays (même TLD, ou gTLD pour les US). */
-function ownsEmdForCountry(existing: string[], tld: string): string | null {
+export function ownsEmdForCountry(existing: string[], tld: string): string | null {
   const gtlds = [".com", ".org", ".net"];
   return (
     existing.find((d) => d.endsWith(tld) || (tld === ".com" && gtlds.some((g) => d.endsWith(g)))) ??
@@ -56,18 +56,25 @@ function ownsEmdForCountry(existing: string[], tld: string): string | null {
   );
 }
 
-/**
- * Domaine de la marque considéré comme EMD concurrent. Sont écartés les sites
- * officiels de l'annonceur : marque.com et ses sous-domaines (shop.lulutox.com)
- * ou try/get/official + marque en .com (tryemsense.com). vitaslimex.fr reste
- * un EMD : c'est exactement le domaine qu'on viserait.
- */
-function isCompetitorEmd(domain: string, brandKey: string): boolean {
-  if (!alnum(domain).includes(brandKey)) return false;
-  const official = [brandKey, `try${brandKey}`, `get${brandKey}`, `official${brandKey}`];
+/** Domaine enregistrable : shop.lulutox.com → lulutox.com, x.co.uk → x.co.uk. */
+function registrable(domain: string): string {
   const labels = domain.split(".");
-  const regLabel = labels.length >= 2 && labels[labels.length - 1] === "com" ? labels[labels.length - 2] : null;
-  return !(regLabel !== null && official.includes(alnum(regLabel)));
+  const n = /^(co|com|org|net|gov|ac)$/.test(labels[labels.length - 2] ?? "") && labels.length > 2 ? 3 : 2;
+  return labels.slice(-n).join(".");
+}
+
+/**
+ * Domaine de la marque considéré comme EMD concurrent. La marque doit être
+ * dans le domaine lui-même (lulutox.zendesk.com, x.square.site = plateformes,
+ * pas des EMD). Sont écartés les sites officiels de l'annonceur : marque.com
+ * et ses sous-domaines, try/get/official + marque en .com (tryemsense.com).
+ * vitaslimex.fr reste un EMD : c'est exactement le domaine qu'on viserait.
+ */
+export function isCompetitorEmd(domain: string, brandKey: string): boolean {
+  const reg = registrable(domain);
+  if (!alnum(reg).includes(brandKey)) return false;
+  const official = [brandKey, `try${brandKey}`, `get${brandKey}`, `official${brandKey}`];
+  return !(reg.endsWith(".com") && official.includes(alnum(reg.slice(0, -4))));
 }
 
 /** Mot-clé = la marque seule : « Lulutox Detox Tea » → « lulutox ». */
