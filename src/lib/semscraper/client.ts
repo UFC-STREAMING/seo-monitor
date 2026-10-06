@@ -107,18 +107,13 @@ function extract(row: SemRow, target: string): SerpCheckResult {
   };
 }
 
-/**
- * Vérifie la position de chaque domaine sur son mot-clé (top 100 organique).
- * Un seul POST par lot de 100, puis polling jusqu'à `timeoutMs`.
- * Les résultats sont renvoyés dans le même ordre que `queries`.
- * @throws SemscraperBalanceError si le crédit est épuisé.
- */
-export async function checkSerpPositions(
-  queries: SerpQuery[],
-  opts: { timeoutMs?: number } = {}
-): Promise<SerpCheckResult[]> {
+/** Lance les SERP par lots de 100 puis poll ; renvoie les lignes brutes (null = timeout). */
+async function runSerpJobs(
+  queries: Array<{ keyword: string; countryIso: string; languageCode: string }>,
+  timeoutMs: number
+): Promise<Array<SemRow | null>> {
   const key = getKey();
-  const out: SerpCheckResult[] = [];
+  const out: Array<SemRow | null> = [];
 
   for (let i = 0; i < queries.length; i += BATCH_MAX) {
     const batch = queries.slice(i, i + BATCH_MAX);
@@ -143,7 +138,7 @@ export async function checkSerpPositions(
     }
 
     const done = new Map<string, SemRow>();
-    const deadline = Date.now() + (opts.timeoutMs ?? 240_000);
+    const deadline = Date.now() + timeoutMs;
     while (done.size < ids.length && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       const pending = ids.filter((id) => !done.has(id));
@@ -156,16 +151,51 @@ export async function checkSerpPositions(
         if (row.status === "done") done.set(row.id, row);
       }
     }
-
-    batch.forEach((q, idx) => {
-      const row = done.get(ids[idx]);
-      out.push(
-        row
-          ? extract(row, q.targetDomain)
-          : { position: null, urlFound: null, serpFeatures: [], cost: 0, error: "Semscraper: timeout" }
-      );
-    });
+    ids.forEach((id) => out.push(done.get(id) ?? null));
   }
 
   return out;
+}
+
+/**
+ * Vérifie la position de chaque domaine sur son mot-clé (top 100 organique).
+ * Un seul POST par lot de 100, puis polling jusqu'à `timeoutMs`.
+ * Les résultats sont renvoyés dans le même ordre que `queries`.
+ * @throws SemscraperBalanceError si le crédit est épuisé.
+ */
+export async function checkSerpPositions(
+  queries: SerpQuery[],
+  opts: { timeoutMs?: number } = {}
+): Promise<SerpCheckResult[]> {
+  const rows = await runSerpJobs(queries, opts.timeoutMs ?? 240_000);
+  return rows.map((row, idx) =>
+    row
+      ? extract(row, queries[idx].targetDomain)
+      : { position: null, urlFound: null, serpFeatures: [], cost: 0, error: "Semscraper: timeout" }
+  );
+}
+
+export interface SerpOrganicResult {
+  /** Domaines organiques dans l'ordre de la SERP (sans www). */
+  domains: string[];
+  cost: number;
+  error?: string;
+}
+
+/** Domaines du top organique de chaque requête (même ordre que `queries`). */
+export async function fetchSerpOrganic(
+  queries: Array<{ keyword: string; countryIso: string; languageCode: string }>,
+  opts: { timeoutMs?: number } = {}
+): Promise<SerpOrganicResult[]> {
+  const rows = await runSerpJobs(queries, opts.timeoutMs ?? 240_000);
+  return rows.map((row) => {
+    if (!row) return { domains: [], cost: 0, error: "Semscraper: timeout" };
+    const domains = (row.results ?? [])
+      .filter((b) => b.type === "organic")
+      .flatMap((b) => b.items ?? [])
+      .sort((a, b) => (a.rank_type ?? 999) - (b.rank_type ?? 999))
+      .map((i) => (i.domain ?? "").toLowerCase().replace(/^www\./, ""))
+      .filter(Boolean);
+    return { domains, cost: row.cost ?? 0 };
+  });
 }

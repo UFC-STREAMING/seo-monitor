@@ -10,6 +10,7 @@ const EFLOW_API = "https://api.eflow.team/v1/affiliates";
 export interface EmdOpportunity {
   brand: string;
   offer: string;
+  offerId: number | null;
   network: string;
   offerStatus: string;
   country: string;
@@ -27,7 +28,7 @@ interface RawConversion {
   revenue?: number;
   is_event?: boolean;
   relationship?: {
-    offer?: { name?: string; offer_status?: string };
+    offer?: { name?: string; offer_status?: string; network_offer_id?: number };
     offer_url?: { name?: string };
   };
 }
@@ -112,6 +113,7 @@ export async function computeEmdOpportunities(
         g = {
           brand,
           offer,
+          offerId: c.relationship?.offer?.network_offer_id ?? null,
           network: net.key,
           offerStatus: c.relationship?.offer?.offer_status ?? "?",
           country,
