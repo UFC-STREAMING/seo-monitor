@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/check-affiliate",
       "schedule": "40 6 * * *"
+    },
+    {
+      "path": "/api/emd-opportunities",
+      "schedule": "30 5 * * *"
     }
   ]
 }

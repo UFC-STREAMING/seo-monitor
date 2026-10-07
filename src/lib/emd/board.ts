@@ -175,5 +175,8 @@ export async function computeBoard(): Promise<EmdBoardRow[]> {
   return all;
 }
 
-/** Recalculé au plus une fois par 24 h (≈ 60 SERP Semscraper par calcul). */
-export const getEmdBoard = unstable_cache(computeBoard, ["emd-board-v1"], { revalidate: 86400 });
+/**
+ * Recalculé au plus une fois par 22 h (≈ 60 SERP Semscraper, ~2 min de calcul).
+ * Le cron 5h30 UTC (vercel.json) le préchauffe : la page ne paie jamais le calcul.
+ */
+export const getEmdBoard = unstable_cache(computeBoard, ["emd-board-v1"], { revalidate: 79200 });
