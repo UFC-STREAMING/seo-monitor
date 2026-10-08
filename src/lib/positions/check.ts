@@ -128,6 +128,33 @@ export async function runPositionChecks(
     }));
   }
 
+  // 3b. Un site classé qui disparaît d'un coup = souvent une SERP incomplète
+  // renvoyée par Semscraper (alpha-nerv.fr : 1er le 05/10, « >100 » le 08/10,
+  // 2e une heure après). On refait la recherche avant d'enregistrer la chute.
+  const lost = toCheck
+    .map((k, i) => i)
+    .filter((i) => !checks[i].error && checks[i].position === null && previousBySite.get(toCheck[i].keyword_id) != null);
+  if (lost.length && !balanceError) {
+    try {
+      const again = await checkSerpPositions(
+        lost.map((i) => ({
+          keyword: toCheck[i].keyword,
+          countryIso: toCheck[i].country_iso,
+          languageCode: toCheck[i].language_code,
+          targetDomain: toCheck[i].domain,
+        }))
+      );
+      lost.forEach((i, j) => {
+        const r = again[j];
+        // 2e échec technique → on n'écrit rien plutôt qu'une fausse chute
+        checks[i] = r.error ? { ...r } : { ...r, cost: r.cost + checks[i].cost };
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      for (const i of lost) checks[i] = { ...checks[i], error: `re-vérification impossible : ${message}` };
+    }
+  }
+
   for (let i = 0; i < toCheck.length; i++) {
     const k = toCheck[i];
     const check = checks[i];
