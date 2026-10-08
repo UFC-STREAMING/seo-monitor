@@ -4,9 +4,9 @@ import { runPositionChecks } from "@/lib/positions/check";
 
 export const maxDuration = 300;
 
-// Cron hebdo (lundi 7h UTC, vercel.json) : check SERP Semscraper de tous les
-// mots-clés EMD, AVANT le rapport de l'agent Hermes EMD (lundi 9h) qui lit
-// ensuite les résultats via /api/agent/emd-report.
+// Cron quotidien (7h UTC, vercel.json — Leo 08/10/2026, avant : lundi seul) :
+// check SERP Semscraper de tous les mots-clés EMD, AVANT le rapport de l'agent
+// Hermes EMD (lundi 9h) qui lit ensuite les résultats via /api/agent/emd-report.
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

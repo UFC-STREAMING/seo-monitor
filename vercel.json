@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/cron/check-positions",
-      "schedule": "0 7 * * 1"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/cron/sync-everflow-revenue",
