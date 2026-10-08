@@ -123,6 +123,68 @@ export async function loadEverflowOffers(): Promise<OfferCatalog> {
   return { byTracker: index, all };
 }
 
+export interface ClickStats {
+  network: string;
+  offer: string;
+  valid: number;
+  invalid: number;
+  conversions: number;
+}
+
+/**
+ * Clics Everflow des 30 derniers jours par sub1 (= domaine avec tirets).
+ * C'est LA preuve qu'un lien marche : un clic valide = Everflow accepte le
+ * lien, quel que soit le numéro d'offre. Les clics invalides (bots, doublons)
+ * sont normaux, même sur des liens qui rapportent.
+ */
+export async function loadClickStats(): Promise<Map<string, ClickStats>> {
+  const out = new Map<string, ClickStats>();
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  for (const net of EVERFLOW_NETWORKS) {
+    const key = process.env[net.tokenEnv];
+    if (!key) continue;
+    await sleep(250);
+    const res = await fetch(`${EFLOW_API}/reporting/entity`, {
+      method: "POST",
+      headers: { "X-Eflow-API-Key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to,
+        timezone_id: 67,
+        currency_id: "USD",
+        query: { filters: [] },
+        columns: [{ column: "offer" }, { column: "sub1" }],
+      }),
+    });
+    if (!res.ok) continue;
+    const json = JSON.parse((await res.text()).replace(/[\u0000-\u001f]/g, " ")) as {
+      table?: Array<{
+        columns: Array<{ column_type: string; id?: string; label?: string }>;
+        reporting: { total_click?: number; invalid_click?: number; cv?: number };
+      }>;
+    };
+    for (const row of json.table ?? []) {
+      const col = (t: string) => row.columns.find((c) => c.column_type === t);
+      const sub1 = (col("sub1")?.label || col("sub1")?.id || "").toLowerCase();
+      if (!sub1 || sub1 === "n/a") continue;
+      const prev = out.get(sub1);
+      const valid = row.reporting.total_click ?? 0;
+      const stats: ClickStats = {
+        network: net.key,
+        offer: col("offer")?.label ?? "",
+        valid: (prev?.valid ?? 0) + valid,
+        invalid: (prev?.invalid ?? 0) + (row.reporting.invalid_click ?? 0),
+        conversions: (prev?.conversions ?? 0) + (row.reporting.cv ?? 0),
+      };
+      // Garder le nom de l'offre qui reçoit le plus de clics valides
+      if (prev && prev.valid > valid) stats.offer = prev.offer;
+      out.set(sub1, stats);
+    }
+  }
+  return out;
+}
+
 const normBrand = (s: string) => s.toLowerCase().normalize("NFD").replace(/[^a-z0-9]/g, "");
 // Everflow écrit « UK » pour le Royaume-Uni
 const toEverflowCountry = (iso: string) => (iso.toUpperCase() === "GB" ? "UK" : iso.toUpperCase());
@@ -260,7 +322,8 @@ function expectedSub1(domain: string): string {
 
 export async function checkAffiliateLink(
   domain: string,
-  offers: Map<string, OfferInfo>
+  offers: Map<string, OfferInfo>,
+  clicks: Map<string, ClickStats> = new Map()
 ): Promise<AffiliateCheck> {
   const base = { domain, target_url: null, network: null, offer_id: null, offer_name: null };
   const cta = await findCtaPath(domain);
@@ -296,13 +359,46 @@ export async function checkAffiliateLink(
   const offer = offers.get(trackerKey(target) ?? "");
   if (!offer) {
     const everflowNet = EVERFLOW_TRACKING_HOSTS[targetHost.replace(/^www\./, "")];
+    if (!everflowNet) {
+      return {
+        ...base,
+        verdict: "pending",
+        target_url: target,
+        detail: `Lien direct marchand/autre réseau (${targetHost}) : redirige bien, approbation non vérifiable par API`,
+      };
+    }
+    // Le numéro d'offre du lien n'apparaît pas dans la liste de l'API (offre
+    // privée, renumérotée…) : ça ne veut PAS dire que le lien est mort. On juge
+    // sur les clics réels. Règle Leo 08/10 : un lien qui marche, on le garde.
+    const sub1 = (new URL(target).searchParams.get("sub1") ?? "").toLowerCase();
+    const st = sub1 ? clicks.get(sub1) : undefined;
+    const name = st?.offer ? ` (« ${st.offer.slice(0, 50)} »)` : "";
+    if (st && st.valid > 0) {
+      return {
+        ...base,
+        verdict: "ok",
+        target_url: target,
+        network: everflowNet,
+        offer_name: st.offer || null,
+        detail: `Lien actif : ${st.valid} clics valides sur 30 j${st.conversions ? `, ${st.conversions} ventes` : ""}${name}`,
+      };
+    }
+    if (st && st.invalid > 0) {
+      return {
+        ...base,
+        verdict: "ko",
+        target_url: target,
+        network: everflowNet,
+        offer_name: st.offer || null,
+        detail: `Everflow refuse tous les clics depuis 30 j (${st.invalid} invalides, 0 valide)${name}`,
+      };
+    }
     return {
       ...base,
       verdict: "pending",
       target_url: target,
-      detail: everflowNet
-        ? `Redirige vers ${everflowNet}, mais l'offre n'est plus dans ton catalogue (retirée ou autre compte) : à vérifier`
-        : `Lien direct marchand/autre réseau (${targetHost}) : redirige bien, approbation non vérifiable par API`,
+      network: everflowNet,
+      detail: `Redirige vers ${everflowNet}, aucun clic sur 30 j : impossible de juger, lien laissé tel quel`,
     };
   }
 
@@ -351,21 +447,21 @@ export async function runAffiliateChecks(
   const isoByCode = new Map((locations ?? []).map((l) => [l.code, l.country_iso]));
 
   const catalog = await loadEverflowOffers();
+  const clicks = await loadClickStats();
   const results: AffiliateCheck[] = [];
   const list = sites ?? [];
   for (let i = 0; i < list.length; i += 8) {
     const batch = list.slice(i, i + 8);
     const checks = await Promise.all(
-      batch.map((s) => checkAffiliateLink(s.domain, catalog.byTracker))
+      batch.map((s) => checkAffiliateLink(s.domain, catalog.byTracker, clicks))
     );
     for (let j = 0; j < batch.length; j++) {
       const c = checks[j];
       results.push(c);
 
-      // Lien KO ou offre disparue du catalogue → chercher une offre approuvée ailleurs
+      // Lien KO seulement → proposer une offre approuvée (jamais de bascule auto)
       let suggestion: string | null = null;
-      const offerGone = c.verdict === "pending" && c.detail.startsWith("Redirige vers");
-      if ((c.verdict === "ko" && c.detail !== "Site injoignable") || offerGone) {
+      if (c.verdict === "ko" && c.detail !== "Site injoignable") {
         const kws = (batch[j].keywords ?? []) as Array<{
           keyword: string;
           is_primary: boolean;
