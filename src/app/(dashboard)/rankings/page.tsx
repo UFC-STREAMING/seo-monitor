@@ -252,7 +252,7 @@ function EmdOpportunitiesCard() {
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    fetch("/api/emd-opportunities")
+    fetch("/api/emd-opportunities", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((j) => setRows(j.rows))
       .catch(() => setRows([]));
@@ -379,7 +379,7 @@ export default function RankingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/rankings");
+      const res = await fetch("/api/rankings", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setData(await res.json());
     } catch {
@@ -574,7 +574,14 @@ export default function RankingsPage() {
                 key={row.site_id}
                 className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[14rem_6rem_1fr_1fr] md:items-center"
               >
-                <span className="font-medium truncate">{row.domain}</span>
+                <a
+                  href={`https://${row.domain}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium truncate text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                  {row.domain}
+                </a>
                 <span>
                   {row.affiliate.status === "ko" ? (
                     <Badge className="bg-red-600 hover:bg-red-600 text-white text-xs">KO</Badge>
@@ -807,7 +814,7 @@ function EmdTableRow({
           href={`https://${row.domain}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="font-medium hover:underline"
+          className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
         >
           {row.domain}
         </a>

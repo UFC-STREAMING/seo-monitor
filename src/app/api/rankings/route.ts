@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 // API de la page /rankings : suivi domaines EMD (mot-clé principal, positions,
 // coûts, revenus, ROI) + classement des domaines importés de Cloudflare.
 
+export const dynamic = "force-dynamic";
+
 const HISTORY_DAYS = 180;
 
 export async function GET() {
@@ -47,17 +49,26 @@ export async function GET() {
 
   // Historique des positions (180 jours) du mot-clé principal
   const since = new Date(Date.now() - HISTORY_DAYS * 86400_000).toISOString();
-  const { data: positions } = keywordIds.length
-    ? await supabase
-        .from("keyword_positions")
-        .select("keyword_id, position, url_found, checked_at")
-        .in("keyword_id", keywordIds)
-        .gte("checked_at", since)
-        .order("checked_at", { ascending: true })
-    : { data: [] };
+  // Par pages de 1000 : Supabase plafonne une réponse à 1000 lignes, et le relevé
+  // quotidien en ajoute ~80/jour. Sans ça, les positions LES PLUS RÉCENTES
+  // étaient coupées (tri croissant) et la page affichait de vieux « >100 ».
+  const positions: Array<{ keyword_id: string; position: number | null; url_found: string | null; checked_at: string }> = [];
+  for (let from = 0; keywordIds.length; from += 1000) {
+    const { data: page, error: posErr } = await supabase
+      .from("keyword_positions")
+      .select("keyword_id, position, url_found, checked_at")
+      .in("keyword_id", keywordIds)
+      .gte("checked_at", since)
+      .order("checked_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (posErr) return NextResponse.json({ error: posErr.message }, { status: 500 });
+    positions.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+  }
 
   const historyByKeyword = new Map<string, Array<{ position: number | null; checked_at: string }>>();
-  for (const p of positions ?? []) {
+  for (const p of positions) {
     const list = historyByKeyword.get(p.keyword_id) ?? [];
     list.push({ position: p.position, checked_at: p.checked_at });
     historyByKeyword.set(p.keyword_id, list);
