@@ -106,7 +106,7 @@ export async function runPositionChecks(
   }
 
   // 3. Un seul lot Semscraper (async, polling) pour tous les mots-clés
-  // Budget temps : la fonction Vercel est coupée à 800 s et n'écrit qu'à la fin.
+  // Budget temps : la fonction Vercel est coupée à 300 s (800 refusé par le compte) et n'écrit qu'à la fin.
   const startedAt = Date.now();
   let checks: SerpCheckResult[] = [];
   try {
@@ -117,7 +117,7 @@ export async function runPositionChecks(
         languageCode: k.language_code,
         targetDomain: k.domain,
       })),
-      { timeoutMs: 420_000 }
+      { timeoutMs: 200_000 }
     );
   } catch (err) {
     if (err instanceof SemscraperBalanceError) balanceError = true;
@@ -137,7 +137,7 @@ export async function runPositionChecks(
   const lost = toCheck
     .map((k, i) => i)
     .filter((i) => !checks[i].error && checks[i].position === null && previousBySite.get(toCheck[i].keyword_id) != null);
-  const remainingMs = 700_000 - (Date.now() - startedAt);
+  const remainingMs = 270_000 - (Date.now() - startedAt);
   if (lost.length && !balanceError && remainingMs > 60_000) {
     try {
       const again = await checkSerpPositions(
@@ -147,7 +147,7 @@ export async function runPositionChecks(
           languageCode: toCheck[i].language_code,
           targetDomain: toCheck[i].domain,
         })),
-        { timeoutMs: Math.min(240_000, remainingMs - 30_000) }
+        { timeoutMs: remainingMs - 20_000 }
       );
       lost.forEach((i, j) => {
         const r = again[j];

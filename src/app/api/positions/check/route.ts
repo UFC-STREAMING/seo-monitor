@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runPositionChecks } from "@/lib/positions/check";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 // Check SERP à la demande (bouton "Check maintenant" de /rankings).
 // Body optionnel : { site_id: "..." } pour ne vérifier qu'un seul domaine.
