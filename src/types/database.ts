@@ -178,6 +178,7 @@ export interface Database {
           keyword: string;
           location_code: number;
           is_primary: boolean;
+          geo_extra: boolean;
           created_at: string;
         };
         Insert: {
@@ -186,6 +187,7 @@ export interface Database {
           keyword: string;
           location_code: number;
           is_primary?: boolean;
+          geo_extra?: boolean;
           created_at?: string;
         };
         Update: {
@@ -194,6 +196,7 @@ export interface Database {
           keyword?: string;
           location_code?: number;
           is_primary?: boolean;
+          geo_extra?: boolean;
           created_at?: string;
         };
         Relationships: [

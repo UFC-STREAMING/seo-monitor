@@ -66,6 +66,8 @@ interface EmdRow {
   previous_position: number | null;
   last_checked_at: string | null;
   history: HistoryPoint[];
+  /** EMD .com/.org/.net : même mot-clé suivi dans les autres pays anglophones de l'offre. */
+  geo_positions: Array<{ country_iso: string; position: number | null; previous_position: number | null; checked: boolean }>;
   finance: {
     purchase_price: number;
     purchase_date: string | null;
@@ -894,6 +896,26 @@ function EmdTableRow({
           <PositionBadge position={row.position} />
         ) : (
           <span className="text-xs text-muted-foreground">jamais</span>
+        )}
+        {row.geo_positions?.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {row.geo_positions.map((g) => (
+              <span
+                key={g.country_iso}
+                className="inline-flex items-center gap-0.5 text-xs whitespace-nowrap"
+                title={`Position ${g.country_iso}${g.previous_position !== null ? ` (avant #${g.previous_position})` : ""}`}
+              >
+                {isoFlag(g.country_iso)}
+                {g.checked ? (
+                  <span className={g.position === null ? "text-red-500" : g.position <= 10 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground"}>
+                    {g.position === null ? ">100" : `#${g.position}`}
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">…</span>
+                )}
+              </span>
+            ))}
+          </div>
         )}
       </TableCell>
       <TableCell>

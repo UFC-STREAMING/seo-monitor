@@ -13,6 +13,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 import { EVERFLOW_NETWORKS } from "@/lib/everflow/client";
+import { syncGeoKeywords } from "@/lib/positions/geo-extra";
 
 const EFLOW_API = "https://api.eflow.team/v1/affiliates";
 // MediaScaler renvoie une erreur code=8 au-delà de 100 offres par page
@@ -32,7 +33,7 @@ export interface AffiliateCheck {
   detail: string;
 }
 
-interface OfferInfo {
+export interface OfferInfo {
   network: string;
   offerId: number;
   name: string;
@@ -194,7 +195,7 @@ const NETWORK_RANK: Record<string, number> = { mediascaler: 0, smartadv: 1, smas
 const countriesCache = new Map<string, string[]>();
 
 /** Pays autorisés d'une offre (ruleset de la relation affilié), lus par l'API. */
-async function offerCountries(offer: OfferInfo): Promise<string[]> {
+export async function offerCountries(offer: OfferInfo): Promise<string[]> {
   const cacheKey = `${offer.network}#${offer.offerId}`;
   const cached = countriesCache.get(cacheKey);
   if (cached) return cached;
@@ -491,6 +492,13 @@ export async function runAffiliateChecks(
         })
         .eq("id", batch[j].id);
     }
+  }
+
+  // Pays anglophones à suivre en plus pour les EMD .com/.org/.net (relevé de 7h)
+  try {
+    await syncGeoKeywords(supabase, catalog);
+  } catch (err) {
+    console.error("syncGeoKeywords", err);
   }
   return results;
 }

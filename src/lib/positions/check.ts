@@ -65,9 +65,9 @@ export async function runPositionChecks(
     .eq("sites.category", "emd")
     .eq("sites.serp_tracking_enabled", true)
     .eq("sites.is_active", true)
-    // 1 seul mot-clé payant par domaine (les keywords hérités du mode shop
-    // restent en base mais ne déclenchent aucun appel SERP)
-    .eq("is_primary", true);
+    // Mot-clé principal + ses pays anglophones en plus (geo_extra, EMD .com/.org/.net).
+    // Les keywords hérités du mode shop restent en base sans appel SERP.
+    .or("is_primary.eq.true,geo_extra.eq.true");
   if (opts.siteId) query = query.eq("site_id", opts.siteId);
 
   const { data: rows, error } = await query;

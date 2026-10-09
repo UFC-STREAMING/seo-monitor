@@ -45,7 +45,24 @@ export async function GET() {
   const kwBySite = new Map(
     (primaryKeywords ?? []).map((k) => [k.site_id, k])
   );
-  const keywordIds = (primaryKeywords ?? []).map((k) => k.id);
+  // Pays en plus des EMD .com/.org/.net (même mot-clé, autres SERP anglophones)
+  const { data: geoKeywords } = emdIds.length
+    ? await supabase
+        .from("keywords")
+        .select("id, site_id, location_code, locations(country_iso)")
+        .in("site_id", emdIds)
+        .eq("geo_extra", true)
+    : { data: [] };
+  const geoBySite = new Map<string, Array<{ id: string; iso: string }>>();
+  for (const g of geoKeywords ?? []) {
+    const iso = (g.locations as unknown as { country_iso: string } | null)?.country_iso ?? "?";
+    geoBySite.set(g.site_id, [...(geoBySite.get(g.site_id) ?? []), { id: g.id, iso }]);
+  }
+
+  const keywordIds = [
+    ...(primaryKeywords ?? []).map((k) => k.id),
+    ...(geoKeywords ?? []).map((k) => k.id),
+  ];
 
   // Historique des positions (180 jours) du mot-clé principal
   const since = new Date(Date.now() - HISTORY_DAYS * 86400_000).toISOString();
@@ -141,6 +158,15 @@ export async function GET() {
       previous_position: previous?.position ?? null,
       last_checked_at: current?.checked_at ?? null,
       history,
+      geo_positions: (geoBySite.get(site.id) ?? []).map((g) => {
+        const h = historyByKeyword.get(g.id) ?? [];
+        return {
+          country_iso: g.iso,
+          position: h.length ? h[h.length - 1].position : null,
+          previous_position: h.length > 1 ? h[h.length - 2].position : null,
+          checked: h.length > 0,
+        };
+      }),
       finance: fin
         ? {
             purchase_price: Number(fin.purchase_price),
