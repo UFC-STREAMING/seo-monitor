@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runPositionChecks } from "@/lib/positions/check";
 
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 // Cron quotidien (7h UTC, vercel.json — Leo 08/10/2026, avant : lundi seul) :
 // check SERP Semscraper de tous les mots-clés EMD, AVANT le rapport de l'agent
