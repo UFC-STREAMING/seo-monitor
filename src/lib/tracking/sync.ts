@@ -11,6 +11,9 @@ import { EVERFLOW_NETWORKS, normalizeDomainKey, cleanSub1 } from "@/lib/everflow
 type Supa = SupabaseClient<Database>;
 const BING_API = "https://ssl.bing.com/webmaster/api.svc/json/";
 const EFLOW_API = "https://api.eflow.team/v1/affiliates";
+// Nos propres clics (Leo en Bulgarie jusqu'au 01/10, puis en Thaïlande) : aucun EMD ne
+// cible ces pays, ce ne sont pas des visiteurs (gloramd.es : 29 clics « Bulgarie/macOS »).
+const OWN_COUNTRIES = new Set(["Bulgaria", "Thailand"]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -74,13 +77,15 @@ export async function syncEverflow(supabase: Supa, days = 3): Promise<{ rows: nu
       const res = await fetch(`${EFLOW_API}/reporting/entity`, {
         method: "POST",
         headers: { "X-Eflow-API-Key": key, "Content-Type": "application/json" },
-        body: JSON.stringify({ from: date, to: date, timezone_id: 67, currency_id: "USD", query: { filters: [] }, columns: [{ column: "sub1" }] }),
+        body: JSON.stringify({ from: date, to: date, timezone_id: 67, currency_id: "USD", query: { filters: [] }, columns: [{ column: "sub1" }, { column: "country" }] }),
       });
       if (!res.ok) { errors.push(`${net.key} ${date}: HTTP ${res.status}`); continue; }
       const json = JSON.parse((await res.text()).replace(/[\u0000-\u001f]/g, " ")) as {
         table?: Array<{ columns: Array<{ column_type: string; id?: string; label?: string }>; reporting: { total_click?: number; invalid_click?: number; cv?: number; revenue?: number } }>;
       };
       for (const row of json.table ?? []) {
+        const country = row.columns.find((x) => x.column_type === "country");
+        if (OWN_COUNTRIES.has(country?.label ?? country?.id ?? "")) continue;
         const c = row.columns.find((x) => x.column_type === "sub1");
         const sub1 = cleanSub1(c?.label || c?.id || null);
         const siteId = sub1 ? byKey.get(normalizeDomainKey(sub1)) : undefined;
