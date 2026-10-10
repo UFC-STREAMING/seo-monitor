@@ -40,11 +40,11 @@ export async function GET(request: NextRequest) {
   }
 
   // Données quotidiennes sur la période (paginées : plafond 1000 lignes)
-  const daily: Array<{ site_id: string; source: string; impressions: number | null; clicks: number | null; sessions: number | null; scroll_depth: number | null; rage_clicks: number | null; go_clicks: number | null; go_invalid: number | null; conversions: number | null; revenue_usd: number | null; date: string }> = [];
+  const daily: Array<{ site_id: string; source: string; impressions: number | null; clicks: number | null; sessions: number | null; scroll_depth: number | null; rage_clicks: number | null; go_clicks: number | null; go_invalid: number | null; conversions: number | null; revenue_usd: number | null; extra: Record<string, unknown> | null; date: string }> = [];
   for (let from = 0; ; from += 1000) {
     const { data: page, error: e } = await supabase
       .from("tracking_daily")
-      .select("site_id, source, date, impressions, clicks, sessions, scroll_depth, rage_clicks, go_clicks, go_invalid, conversions, revenue_usd")
+      .select("site_id, source, date, impressions, clicks, sessions, scroll_depth, rage_clicks, go_clicks, go_invalid, conversions, revenue_usd, extra")
       .gte("date", since)
       .order("id", { ascending: true })
       .range(from, from + 999);
@@ -78,6 +78,9 @@ export async function GET(request: NextRequest) {
       rage_clicks: clarity.length ? sum("clarity", "rage_clicks") : null,
       go_clicks: sum("everflow", "go_clicks"),
       go_invalid: sum("everflow", "go_invalid"),
+      go_bots: mine
+        .filter((d) => d.source === "everflow")
+        .reduce((a, d) => a + Number((d.extra as { bots?: number } | null)?.bots ?? 0), 0),
       conversions: sum("everflow", "conversions"),
       revenue_usd: sum("everflow", "revenue_usd"),
     };
@@ -91,10 +94,11 @@ export async function GET(request: NextRequest) {
       bing_clicks: t.bing_clicks + r.bing_clicks,
       sessions: t.sessions + (r.sessions ?? 0),
       go_clicks: t.go_clicks + r.go_clicks,
+      go_bots: t.go_bots + r.go_bots,
       conversions: t.conversions + r.conversions,
       revenue_usd: t.revenue_usd + r.revenue_usd,
     }),
-    { bing_impressions: 0, bing_clicks: 0, sessions: 0, go_clicks: 0, conversions: 0, revenue_usd: 0 }
+    { bing_impressions: 0, bing_clicks: 0, sessions: 0, go_clicks: 0, go_bots: 0, conversions: 0, revenue_usd: 0 }
   );
   const lastBing = daily.filter((d) => d.source === "bing").map((d) => d.date).sort().pop() ?? null;
   return NextResponse.json({ days, totals, last_bing_date: lastBing, clarity_sites: new Set(daily.filter((d) => d.source === "clarity").map((d) => d.site_id)).size, rows });

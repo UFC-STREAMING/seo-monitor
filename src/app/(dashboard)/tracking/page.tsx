@@ -17,11 +17,11 @@ interface Row {
   site_id: string; domain: string; hosting: string | null; keyword: string | null; country_iso: string | null;
   position: number | null; position_checked: boolean; affiliate_status: string | null;
   bing_impressions: number; bing_clicks: number; sessions: number | null; scroll_depth: number | null;
-  go_clicks: number; go_invalid: number; conversions: number; revenue_usd: number; findings: Finding[];
+  go_clicks: number; go_invalid: number; go_bots: number; conversions: number; revenue_usd: number; findings: Finding[];
 }
 interface Resp {
   days: number; last_bing_date: string | null; clarity_sites: number;
-  totals: { bing_impressions: number; bing_clicks: number; sessions: number; go_clicks: number; conversions: number; revenue_usd: number };
+  totals: { bing_impressions: number; bing_clicks: number; sessions: number; go_clicks: number; go_bots: number; conversions: number; revenue_usd: number };
   rows: Row[];
 }
 
@@ -77,7 +77,7 @@ export default function TrackingPage() {
         { label: "Impressions Bing/Yahoo", value: nf(t.bing_impressions) },
         { label: "Clics Bing/Yahoo", value: nf(t.bing_clicks) },
         { label: "Visites (Clarity)", value: data!.clarity_sites ? nf(t.sessions) : "—" },
-        { label: "Clics bouton", value: nf(t.go_clicks) },
+        { label: `Clics bouton humains (+${nf(t.go_bots)} robots exclus)`, value: nf(t.go_clicks) },
         { label: "Ventes", value: nf(t.conversions) },
         { label: "Revenus", value: `${nf(Math.round(t.revenue_usd))} $` },
       ]
@@ -144,7 +144,7 @@ export default function TrackingPage() {
                     <TableHead className="w-24 text-right">Bing impr.</TableHead>
                     <TableHead className="w-20 text-right">Bing clics</TableHead>
                     <TableHead className="w-20 text-right">Visites</TableHead>
-                    <TableHead className="w-24 text-right">Clics bouton</TableHead>
+                    <TableHead className="w-28 text-right">Clics humains</TableHead>
                     <TableHead className="w-16 text-right">Ventes</TableHead>
                     <TableHead className="w-20 text-right">Revenus</TableHead>
                     <TableHead className="min-w-72">Constats</TableHead>
@@ -165,7 +165,13 @@ export default function TrackingPage() {
                       <TableCell className="text-right">{r.sessions === null ? <span className="text-muted-foreground">—</span> : nf(r.sessions)}</TableCell>
                       <TableCell className="text-right">
                         {nf(r.go_clicks)}
-                        {r.go_invalid > 0 && <div className="text-xs text-muted-foreground">+{nf(r.go_invalid)} refusés</div>}
+                        {(r.go_bots > 0 || r.go_invalid > 0) && (
+                          <div className="text-xs text-muted-foreground">
+                            {r.go_bots > 0 && `${nf(r.go_bots)} robots`}
+                            {r.go_bots > 0 && r.go_invalid > 0 && " · "}
+                            {r.go_invalid > 0 && `${nf(r.go_invalid)} refusés`}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-medium">{r.conversions || ""}</TableCell>
                       <TableCell className="text-right font-medium">{r.revenue_usd ? `${nf(Math.round(r.revenue_usd))} $` : ""}</TableCell>

@@ -19,6 +19,7 @@ export interface FunnelRow {
   rage_clicks: number | null;
   go_clicks: number;
   go_invalid: number;
+  go_bots: number;
   conversions: number;
   revenue_usd: number;
   findings: Finding[];
@@ -54,6 +55,8 @@ export function findingsFor(r: Omit<FunnelRow, "findings">): Finding[] {
   if (r.position !== null && r.position <= 10 && r.go_clicks === 0 && r.affiliate_status !== "ko")
     f.push({ level: "warn", text: `#${r.position} sur Google mais 0 clic bouton : vérifier le trafic réel et le bouton` });
 
+  if (r.go_bots >= 20 && r.go_bots > r.go_clicks * 2)
+    f.push({ level: "info", text: `${r.go_bots} clics de robots/VPN exclus (${r.go_clicks} humains)` });
   if (r.conversions > 0 && r.go_clicks >= 50 && r.conversions / r.go_clicks < 0.03)
     f.push({ level: "warn", text: `${r.go_clicks} clics bouton pour ${r.conversions} vente(s) (${((r.conversions / r.go_clicks) * 100).toFixed(1)} %) : conversion faible, vérifier l'offre et la page de vente` });
   if (r.conversions > 0) f.push({ level: "good", text: `${r.conversions} vente(s), ${Math.round(r.revenue_usd)} $` });
