@@ -61,6 +61,58 @@ export interface IndexerTaskResults {
 export interface Database {
   public: {
     Tables: {
+      clarity_projects: {
+        Row: { site_id: string; project_id: string; api_token: string | null; tag_installed_at: string | null; created_at: string };
+        Insert: { site_id: string; project_id: string; api_token?: string | null; tag_installed_at?: string | null; created_at?: string };
+        Update: { site_id?: string; project_id?: string; api_token?: string | null; tag_installed_at?: string | null; created_at?: string };
+        Relationships: [];
+      };
+      tracking_daily: {
+        Row: {
+          id: number;
+          site_id: string;
+          date: string;
+          source: string;
+          impressions: number | null;
+          clicks: number | null;
+          sessions: number | null;
+          pageviews: number | null;
+          scroll_depth: number | null;
+          engagement_seconds: number | null;
+          rage_clicks: number | null;
+          dead_clicks: number | null;
+          quickbacks: number | null;
+          go_clicks: number | null;
+          go_invalid: number | null;
+          conversions: number | null;
+          revenue_usd: number | null;
+          extra: Record<string, unknown> | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          site_id: string;
+          date: string;
+          source: string;
+          impressions?: number | null;
+          clicks?: number | null;
+          sessions?: number | null;
+          pageviews?: number | null;
+          scroll_depth?: number | null;
+          engagement_seconds?: number | null;
+          rage_clicks?: number | null;
+          dead_clicks?: number | null;
+          quickbacks?: number | null;
+          go_clicks?: number | null;
+          go_invalid?: number | null;
+          conversions?: number | null;
+          revenue_usd?: number | null;
+          extra?: Record<string, unknown> | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["tracking_daily"]["Insert"]>;
+        Relationships: [];
+      };
       sites: {
         Row: {
           id: string;
@@ -974,6 +1026,10 @@ export interface Database {
     };
 
     Functions: {
+      latest_keyword_positions: {
+        Args: { p_keyword_ids: string[] };
+        Returns: { keyword_id: string; position: number | null; checked_at: string }[];
+      };
       emd_brand_impressions: {
         Args: { p_days?: number };
         Returns: {

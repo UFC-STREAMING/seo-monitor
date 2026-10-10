@@ -16,6 +16,7 @@ import {
   Link2,
   FileSearch,
   TrendingUp,
+  Activity,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -23,6 +24,7 @@ import { useRouter } from "next/navigation";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Rankings EMD", href: "/rankings", icon: TrendingUp },
+  { name: "Tracking EMD", href: "/tracking", icon: Activity },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileSearch },
