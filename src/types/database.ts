@@ -61,6 +61,12 @@ export interface IndexerTaskResults {
 export interface Database {
   public: {
     Tables: {
+      cta_clicks: {
+        Row: { id: number; site_id: string | null; domain: string; page_path: string | null; position: string | null; cta_index: number | null; cta_text: string | null; y_pct: number | null; device: string | null; country: string | null; created_at: string };
+        Insert: { id?: number; site_id?: string | null; domain: string; page_path?: string | null; position?: string | null; cta_index?: number | null; cta_text?: string | null; y_pct?: number | null; device?: string | null; country?: string | null; created_at?: string };
+        Update: { site_id?: string | null; domain?: string; page_path?: string | null; position?: string | null; cta_index?: number | null; cta_text?: string | null; y_pct?: number | null; device?: string | null; country?: string | null };
+        Relationships: [];
+      };
       clarity_projects: {
         Row: { site_id: string; project_id: string; api_token: string | null; tag_installed_at: string | null; created_at: string };
         Insert: { site_id: string; project_id: string; api_token?: string | null; tag_installed_at?: string | null; created_at?: string };
@@ -115,6 +121,7 @@ export interface Database {
       };
       sites: {
         Row: {
+          template: string | null;
           id: string;
           user_id: string;
           domain: string;
@@ -143,6 +150,7 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
+          template?: string | null;
           id?: string;
           user_id: string;
           domain: string;
@@ -171,6 +179,7 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          template?: string | null;
           id?: string;
           user_id?: string;
           domain?: string;
