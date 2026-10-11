@@ -126,3 +126,67 @@ export async function syncEverflow(supabase: Supa, days = 3): Promise<{ rows: nu
   await upsert(supabase, rows);
   return { rows: rows.length, errors };
 }
+
+/**
+ * Clarity : 1 appel par projet et par jour (quota 10/jour/projet), dernières 24 h,
+ * rangées sur la veille. Visites = sessions totales − sessions de robots détectées
+ * par Clarity. API : https://www.clarity.ms/export-data/api/v1/project-live-insights
+ */
+export async function syncClarity(supabase: Supa): Promise<{ projects: number; rows: number; errors: string[] }> {
+  const { data: projects, error } = await supabase
+    .from("clarity_projects")
+    .select("site_id, project_id, api_token")
+    .not("api_token", "is", null);
+  if (error) throw new Error(`clarity_projects: ${error.message}`);
+  const date = isoDay(new Date(Date.now() - 86400_000));
+  const rows: Database["public"]["Tables"]["tracking_daily"]["Insert"][] = [];
+  const errors: string[] = [];
+  const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
+  const list = projects ?? [];
+  for (let i = 0; i < list.length; i += 6) {
+    await Promise.all(
+      list.slice(i, i + 6).map(async (p) => {
+        try {
+          // Détail par pays pour exclure nos propres visites (Thaïlande/Bulgarie)
+          const res = await fetch("https://www.clarity.ms/export-data/api/v1/project-live-insights?numOfDays=1&dimension1=Country%2FRegion", {
+            headers: { Authorization: `Bearer ${p.api_token}`, "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!res.ok) { errors.push(`${p.project_id}: HTTP ${res.status}`); return; }
+          const json = (await res.json()) as Array<{ metricName: string; information: Array<Record<string, unknown>> }>;
+          const OWN = /^(thailand|bulgaria)$/i;
+          const rowsOf = (name: string) =>
+            (json.find((m) => m.metricName === name)?.information ?? []).filter((r) => !OWN.test(String(r["Country/Region"] ?? r.Country ?? "")));
+          const traffic = rowsOf("Traffic");
+          const total = traffic.reduce((a, r) => a + (num(r.totalSessionCount) ?? 0), 0);
+          const bots = traffic.reduce((a, r) => a + (num(r.totalBotSessionCount) ?? 0), 0);
+          const sessions = Math.max(0, total - bots);
+          const pages = traffic.reduce((a, r) => a + Math.max(0, (num(r.totalSessionCount) ?? 0) - (num(r.totalBotSessionCount) ?? 0)) * (num(r.PagesPerSessionPercentage) ?? 1), 0);
+          const avg = (name: string, field: string) => {
+            const v = rowsOf(name).map((r) => num(r[field])).filter((x): x is number => x !== null);
+            return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+          };
+          const sumOf = (name: string) => rowsOf(name).reduce((a, r) => a + (num(r.subTotal) ?? 0), 0);
+          rows.push({
+            site_id: p.site_id,
+            date,
+            source: "clarity",
+            sessions,
+            pageviews: Math.round(pages),
+            scroll_depth: avg("ScrollDepth", "averageScrollDepth"),
+            engagement_seconds: avg("EngagementTime", "activeTime"),
+            rage_clicks: sumOf("RageClickCount"),
+            dead_clicks: sumOf("DeadClickCount"),
+            quickbacks: sumOf("QuickbackClick"),
+            extra: { bot_sessions: bots },
+            updated_at: new Date().toISOString(),
+          });
+        } catch (e) {
+          errors.push(`${p.project_id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      })
+    );
+  }
+  await upsert(supabase, rows);
+  return { projects: list.length, rows: rows.length, errors };
+}
