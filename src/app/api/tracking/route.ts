@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findingsFor, severity, type FunnelRow } from "@/lib/tracking/funnel";
 import { analyze } from "@/lib/tracking/analysis";
+import { clickSplit, compareFeatures } from "@/lib/tracking/insights";
+import type { PageFeatures } from "@/lib/tracking/page-features";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,7 @@ export async function GET(request: NextRequest) {
 
   const { data: sites, error } = await supabase
     .from("sites")
-    .select("id, domain, hosting, affiliate_status, affiliate_detail, is_active")
+    .select("id, domain, hosting, affiliate_status, affiliate_detail, is_active, page_features")
     .eq("category", "emd")
     .eq("is_active", true);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -103,5 +105,32 @@ export async function GET(request: NextRequest) {
   );
   const lastBing = daily.filter((d) => d.source === "bing").map((d) => d.date).sort().pop() ?? null;
   const analysis = analyze(rows, days);
-  return NextResponse.json({ days, totals, analysis, last_bing_date: lastBing, clarity_sites: new Set(daily.filter((d) => d.source === "clarity").map((d) => d.site_id)).size, rows });
+
+  // Où ça clique (marquage des boutons) + ce qui marche (éléments de page)
+  const clicks: Array<{ site_id: string | null; position: string | null; device: string | null; cta_text: string | null }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page } = await supabase
+      .from("cta_clicks")
+      .select("site_id, position, device, cta_text")
+      .gte("created_at", since)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    clicks.push(...(page ?? []));
+    if (!page || page.length < 1000) break;
+  }
+  const featureMap = new Map(
+    (sites ?? []).filter((s) => s.page_features).map((s) => [s.id, s.page_features as unknown as PageFeatures])
+  );
+  const topTexts = [...clicks.reduce((m, c) => m.set(c.cta_text ?? "", (m.get(c.cta_text ?? "") ?? 0) + 1), new Map<string, number>())]
+    .filter(([t]) => t)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([text, n]) => ({ text, clicks: n }));
+  const insights = {
+    cta_clicks: clicks.length,
+    split: clickSplit(clicks),
+    top_texts: topTexts,
+    features: compareFeatures(rows, featureMap),
+  };
+  return NextResponse.json({ days, totals, analysis, insights, last_bing_date: lastBing, clarity_sites: new Set(daily.filter((d) => d.source === "clarity").map((d) => d.site_id)).size, rows });
 }

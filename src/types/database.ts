@@ -121,6 +121,8 @@ export interface Database {
       };
       sites: {
         Row: {
+          page_features: Record<string, unknown> | null;
+          page_scanned_at: string | null;
           template: string | null;
           id: string;
           user_id: string;
@@ -150,6 +152,8 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
+          page_features?: Record<string, unknown> | null;
+          page_scanned_at?: string | null;
           template?: string | null;
           id?: string;
           user_id: string;
@@ -179,6 +183,8 @@ export interface Database {
           updated_at?: string;
         };
         Update: {
+          page_features?: Record<string, unknown> | null;
+          page_scanned_at?: string | null;
           template?: string | null;
           id?: string;
           user_id?: string;

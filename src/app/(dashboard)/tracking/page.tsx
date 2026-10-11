@@ -20,7 +20,21 @@ interface Row {
   go_clicks: number; go_invalid: number; go_bots: number; conversions: number; revenue_usd: number; findings: Finding[];
 }
 interface Opportunity { site_id: string; domain: string; stage: "bouton" | "vente"; monthly_usd: number; confidence: "sure" | "probable" | "early"; explanation: string }
+interface FeatureCmp {
+  feature: string;
+  with: { sites: number; sessions: number; clicks: number; sales: number };
+  without: { sites: number; sessions: number; clicks: number; sales: number };
+  click_rate_with: number | null; click_rate_without: number | null;
+  sale_rate_with: number | null; sale_rate_without: number | null;
+  enough_data: boolean;
+}
 interface Resp {
+  insights: {
+    cta_clicks: number;
+    split: { position: string; clicks: number; share: number; mobile: number }[];
+    top_texts: { text: string; clicks: number }[];
+    features: FeatureCmp[];
+  };
   analysis: {
     benchmarks: { click_rate: number | null; conversion_rate: number | null; usd_per_sale: number; sites_click_rate: number; sites_conversion_rate: number };
     opportunities: Opportunity[];
@@ -162,6 +176,74 @@ export default function TrackingPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {data && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Où ça clique ({nf(data.insights.cta_clicks)} clics boutons)</CardTitle>
+              <p className="text-sm text-muted-foreground">Emplacement du bouton cliqué, mesuré sur la page (vrais clics, nos pays exclus).</p>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {data.insights.cta_clicks === 0 ? (
+                <p className="text-sm text-muted-foreground">Marquage posé le 11/10 : les premiers clics arrivent dans les prochains jours.</p>
+              ) : (
+                <>
+                  {data.insights.split.map((s) => (
+                    <div key={s.position} className="space-y-0.5">
+                      <div className="flex justify-between text-sm">
+                        <span className="capitalize">{s.position.replace("-", " ")}</span>
+                        <span className="text-muted-foreground">{nf(s.clicks)} clics · {Math.round(s.share * 100)} % · {s.clicks ? Math.round((s.mobile / s.clicks) * 100) : 0} % mobile</span>
+                      </div>
+                      <div className="h-2 rounded bg-muted"><div className="h-2 rounded bg-emerald-600" style={{ width: `${Math.round(s.share * 100)}%` }} /></div>
+                    </div>
+                  ))}
+                  {data.insights.top_texts.length > 0 && (
+                    <div className="pt-2 text-xs text-muted-foreground">
+                      Textes de bouton les plus cliqués : {data.insights.top_texts.map((t) => `« ${t.text} » (${t.clicks})`).join(", ")}
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Ce qui marche (éléments de page)</CardTitle>
+              <p className="text-sm text-muted-foreground">EMD avec l&apos;élément contre EMD sans : visite → clic bouton, puis clic → vente.</p>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Élément</TableHead>
+                    <TableHead className="text-right">Visite → clic<br /><span className="font-normal">avec / sans</span></TableHead>
+                    <TableHead className="text-right">Clic → vente<br /><span className="font-normal">avec / sans</span></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.insights.features.map((f) => {
+                    const p = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(1)} %`);
+                    return (
+                      <TableRow key={f.feature}>
+                        <TableCell className="text-sm">
+                          {f.feature}
+                          <div className="text-xs text-muted-foreground">
+                            {f.with.sites} sites avec · {f.without.sites} sans{!f.enough_data && " · trop tôt pour conclure"}
+                          </div>
+                        </TableCell>
+                        <TableCell className={`text-right text-sm ${f.enough_data ? "" : "text-muted-foreground"}`}>{p(f.click_rate_with)} / {p(f.click_rate_without)}</TableCell>
+                        <TableCell className={`text-right text-sm ${f.enough_data ? "" : "text-muted-foreground"}`}>{p(f.sale_rate_with)} / {p(f.sale_rate_without)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <Card>
