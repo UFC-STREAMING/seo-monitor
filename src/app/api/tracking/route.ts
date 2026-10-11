@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findingsFor, severity, type FunnelRow } from "@/lib/tracking/funnel";
+import { analyze } from "@/lib/tracking/analysis";
 
 export const dynamic = "force-dynamic";
 
@@ -101,5 +102,6 @@ export async function GET(request: NextRequest) {
     { bing_impressions: 0, bing_clicks: 0, sessions: 0, go_clicks: 0, go_bots: 0, conversions: 0, revenue_usd: 0 }
   );
   const lastBing = daily.filter((d) => d.source === "bing").map((d) => d.date).sort().pop() ?? null;
-  return NextResponse.json({ days, totals, last_bing_date: lastBing, clarity_sites: new Set(daily.filter((d) => d.source === "clarity").map((d) => d.site_id)).size, rows });
+  const analysis = analyze(rows, days);
+  return NextResponse.json({ days, totals, analysis, last_bing_date: lastBing, clarity_sites: new Set(daily.filter((d) => d.source === "clarity").map((d) => d.site_id)).size, rows });
 }

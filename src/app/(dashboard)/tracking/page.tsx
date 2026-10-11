@@ -19,7 +19,12 @@ interface Row {
   bing_impressions: number; bing_clicks: number; sessions: number | null; scroll_depth: number | null;
   go_clicks: number; go_invalid: number; go_bots: number; conversions: number; revenue_usd: number; findings: Finding[];
 }
+interface Opportunity { site_id: string; domain: string; stage: "bouton" | "vente"; monthly_usd: number; confidence: "sure" | "probable" | "early"; explanation: string }
 interface Resp {
+  analysis: {
+    benchmarks: { click_rate: number | null; conversion_rate: number | null; usd_per_sale: number; sites_click_rate: number; sites_conversion_rate: number };
+    opportunities: Opportunity[];
+  };
   days: number; last_bing_date: string | null; clarity_sites: number;
   totals: { bing_impressions: number; bing_clicks: number; sessions: number; go_clicks: number; go_bots: number; conversions: number; revenue_usd: number };
   rows: Row[];
@@ -120,6 +125,43 @@ export default function TrackingPage() {
           {" · "}Clarity : {data.clarity_sites ? `${data.clarity_sites} site(s)` : "pas encore installé"}
           {" · "}Google : position seulement (pas de Search Console sur les EMD)
         </p>
+      )}
+
+      {data && (
+        <Card className="border-emerald-200 dark:border-emerald-900">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Priorités : $ récupérables par mois</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Ce que chaque EMD rapporterait en plus s&apos;il convertissait comme le parc
+              {data.analysis.benchmarks.conversion_rate !== null && ` (clic → vente : ${(data.analysis.benchmarks.conversion_rate * 100).toFixed(1)} %, mesuré sur ${data.analysis.benchmarks.sites_conversion_rate} EMD`}
+              {data.analysis.benchmarks.click_rate !== null ? ` ; visite → clic : ${(data.analysis.benchmarks.click_rate * 100).toFixed(1)} %)` : data.analysis.benchmarks.conversion_rate !== null ? ")" : ""}
+              . Fiabilité : <b>sûr</b> = l&apos;écart reste même au mieux ; <b>probable</b> ; <b>trop tôt</b> = pas assez de volume, ne pas toucher.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {data.analysis.opportunities.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Rien à récupérer de façon fiable pour l&apos;instant.</p>
+            ) : (
+              data.analysis.opportunities.slice(0, 15).map((o) => (
+                <div key={o.site_id + o.stage} className="grid grid-cols-1 gap-1 rounded-md border px-3 py-2 text-sm md:grid-cols-[7rem_13rem_7rem_1fr] md:items-center">
+                  <span className="font-semibold">+{nf(o.monthly_usd)} $/mois</span>
+                  <a href={`https://${o.domain}`} target="_blank" rel="noopener noreferrer" className="font-medium truncate text-blue-600 hover:underline dark:text-blue-400">{o.domain}</a>
+                  <span>
+                    {o.confidence === "sure" ? (
+                      <Badge className="bg-red-600 hover:bg-red-600 text-white text-xs">sûr</Badge>
+                    ) : o.confidence === "probable" ? (
+                      <Badge className="bg-amber-500 hover:bg-amber-500 text-white text-xs">probable</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">trop tôt</Badge>
+                    )}
+                    <span className="ml-1 text-xs text-muted-foreground">étape {o.stage}</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground">{o.explanation}</span>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <Card>
