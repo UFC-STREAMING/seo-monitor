@@ -61,6 +61,12 @@ export interface IndexerTaskResults {
 export interface Database {
   public: {
     Tables: {
+      network_conversions: {
+        Row: { id: number; network: string; stream: string | null; offer: string | null; status: string | null; payout: number | null; currency: string | null; country: string | null; click_id: string | null; raw: Record<string, unknown>; created_at: string };
+        Insert: { id?: number; network: string; stream?: string | null; offer?: string | null; status?: string | null; payout?: number | null; currency?: string | null; country?: string | null; click_id?: string | null; raw: Record<string, unknown>; created_at?: string };
+        Update: { status?: string | null; payout?: number | null };
+        Relationships: [];
+      };
       fiche_networks: {
         Row: { host: string; path: string; targets: string[]; everflow: boolean; scanned_at: string };
         Insert: { host: string; path: string; targets?: string[]; everflow?: boolean; scanned_at?: string };

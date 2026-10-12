@@ -19,6 +19,7 @@ export interface FichePerf {
   revenue_usd: number;
   usd_per_100_clicks: number | null;
   offers: string[];
+  drcash_leads: number;
   networks: string[];
   measured: boolean; // false = le bouton ne passe par aucun réseau Everflow : ventes invisibles ici
   findings: { level: "bad" | "warn" | "good"; text: string }[];
@@ -35,6 +36,10 @@ export interface SitePerf {
 }
 
 const EVERFLOW_HOSTS = /clickrtrckr|treejammer|diginear|primesavingslink|premierdiscountlink|tricklyn|spacefaller|pixlbonk|contact-account-manager/i;
+// Dr.Cash : trackers doctor*.com, ventes reçues par postback (table network_conversions)
+const DRCASH_HOSTS = /(^|\.)doctor[a-z0-9-]*\.com$|drcash\.io$/i;
+const MEASURED_HOSTS = (h: string) => EVERFLOW_HOSTS.test(h) || DRCASH_HOSTS.test(h);
+const SALE_STATUS = /approv|confirm|accept|sale|paid|success|hold/i;
 const slugOf = (path: string) => (path.split("/").filter(Boolean).pop() ?? "").toLowerCase();
 
 export async function expiredFunnel(supabase: SupabaseClient<Database>, days: number) {
@@ -66,6 +71,21 @@ export async function expiredFunnel(supabase: SupabaseClient<Database>, days: nu
   }
 
   const { data: nets } = await supabase.from("fiche_networks").select("host, path, targets, everflow");
+
+  // Dr.Cash : leads et ventes validées par code de stream (postbacks)
+  const { data: dc } = await supabase
+    .from("network_conversions")
+    .select("stream, status, payout")
+    .eq("network", "drcash")
+    .gte("created_at", `${from}T00:00:00Z`);
+  const byStream = new Map<string, { leads: number; sales: number; rev: number }>();
+  for (const c of dc ?? []) {
+    if (!c.stream) continue;
+    const v = byStream.get(c.stream) ?? { leads: 0, sales: 0, rev: 0 };
+    v.leads++;
+    if (SALE_STATUS.test(c.status ?? "")) { v.sales++; v.rev += Number(c.payout ?? 0); }
+    byStream.set(c.stream, v);
+  }
   const netOf = new Map((nets ?? []).map((n) => [`${n.host}|${n.path}`, n]));
 
   // Médiane des $ / 100 clics Google des fiches qui vendent, pour juger les autres
@@ -73,7 +93,10 @@ export async function expiredFunnel(supabase: SupabaseClient<Database>, days: nu
     const slug = slugOf(p.path);
     const s = sales.get(`${p.host}|${slug}`);
     const clicks = Number(p.clicks);
-    const rev = s?.rev ?? 0;
+    // + ventes Dr.Cash des streams présents sur la fiche
+    const streams = (netOf.get(`${p.host}|${p.path}`)?.targets ?? []).filter((h) => DRCASH_HOSTS.test(h)).map((h) => h.split(".")[0]);
+    const drc = streams.reduce((a, st) => { const v = byStream.get(st); return v ? { leads: a.leads + v.leads, sales: a.sales + v.sales, rev: a.rev + v.rev } : a; }, { leads: 0, sales: 0, rev: 0 });
+    const rev = (s?.rev ?? 0) + drc.rev;
     return {
       host: p.host,
       path: p.path,
@@ -82,7 +105,8 @@ export async function expiredFunnel(supabase: SupabaseClient<Database>, days: nu
       impressions: Number(p.impressions),
       position: p.position,
       top_query: p.top_query,
-      sales: s?.n ?? 0,
+      sales: (s?.n ?? 0) + drc.sales,
+      drcash_leads: drc.leads,
       revenue_usd: Math.round(rev),
       usd_per_100_clicks: clicks ? Math.round((rev / clicks) * 100 * 10) / 10 : null,
       offers: [...(s?.offers ?? [])],
@@ -90,7 +114,7 @@ export async function expiredFunnel(supabase: SupabaseClient<Database>, days: nu
       // Mesurée seulement si TOUS les boutons passent par Everflow (sinon une partie des ventes est invisible)
       measured: (() => {
         const t = netOf.get(`${p.host}|${p.path}`)?.targets ?? [];
-        return t.length === 0 || t.every((h) => EVERFLOW_HOSTS.test(h));
+        return t.length === 0 || t.every(MEASURED_HOSTS);
       })(),
       findings: [],
     };
@@ -101,7 +125,7 @@ export async function expiredFunnel(supabase: SupabaseClient<Database>, days: nu
   for (const f of fiches) {
     if (!f.slug) continue; // page d'accueil : pas de fiche produit
     if (!f.measured)
-      f.findings.push({ level: "warn", text: `Ventes partiellement mesurées : boutons aussi vers ${f.networks.filter((h) => !EVERFLOW_HOSTS.test(h)).slice(0, 3).join(", ")} (hors Everflow)` });
+      f.findings.push({ level: "warn", text: `Ventes partiellement mesurées : boutons aussi vers ${f.networks.filter((h) => !MEASURED_HOSTS(h)).slice(0, 3).join(", ")} (réseau non branché)` });
     else if (f.google_clicks >= 100 && f.sales === 0)
       f.findings.push({ level: "bad", text: `${f.google_clicks} clics Google, 0 vente : lien affilié, offre ou bouton de la fiche à vérifier` });
     else if (median && f.google_clicks >= 100 && (f.usd_per_100_clicks ?? 0) < median / 3)
