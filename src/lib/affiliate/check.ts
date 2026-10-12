@@ -324,7 +324,8 @@ function expectedSub1(domain: string): string {
 export async function checkAffiliateLink(
   domain: string,
   offers: Map<string, OfferInfo>,
-  clicks: Map<string, ClickStats> = new Map()
+  clicks: Map<string, ClickStats> = new Map(),
+  ownHosts: Set<string> = new Set()
 ): Promise<AffiliateCheck> {
   const base = { domain, target_url: null, network: null, offer_id: null, offer_name: null };
   const cta = await findCtaPath(domain);
@@ -361,6 +362,11 @@ export async function checkAffiliateLink(
   if (!offer) {
     const everflowNet = EVERFLOW_TRACKING_HOSTS[targetHost.replace(/^www\./, "")];
     if (!everflowNet) {
+      const host = targetHost.replace(/^www\./, "");
+      // Vers une de NOS fiches (domaine expiré approuvé) : voulu (décision Leo 07/10)
+      if (ownHosts.has(host)) {
+        return { ...base, verdict: "ok", target_url: target, detail: `Vers notre fiche ${host} (voulu)` };
+      }
       return {
         ...base,
         verdict: "pending",
@@ -449,20 +455,23 @@ export async function runAffiliateChecks(
 
   const catalog = await loadEverflowOffers();
   const clicks = await loadClickStats();
+  const { data: own } = await supabase.from("sites").select("domain").in("category", ["shop", "other"]);
+  const ownHosts = new Set((own ?? []).map((o) => o.domain.replace(/^www\./, "")));
   const results: AffiliateCheck[] = [];
   const list = sites ?? [];
   for (let i = 0; i < list.length; i += 8) {
     const batch = list.slice(i, i + 8);
     const checks = await Promise.all(
-      batch.map((s) => checkAffiliateLink(s.domain, catalog.byTracker, clicks))
+      batch.map((s) => checkAffiliateLink(s.domain, catalog.byTracker, clicks, ownHosts))
     );
     for (let j = 0; j < batch.length; j++) {
       const c = checks[j];
       results.push(c);
 
-      // Lien KO seulement → proposer une offre approuvée (jamais de bascule auto)
+      // Lien KO, ou bouton vers le site officiel (0 commission) → offre approuvée de la marque ?
       let suggestion: string | null = null;
-      if (c.verdict === "ko" && c.detail !== "Site injoignable") {
+      const official = c.verdict === "pending" && c.detail.startsWith("Lien direct marchand");
+      if ((c.verdict === "ko" && c.detail !== "Site injoignable") || official) {
         const kws = (batch[j].keywords ?? []) as Array<{
           keyword: string;
           is_primary: boolean;
@@ -476,6 +485,11 @@ export async function runAffiliateChecks(
           network: c.network,
           offerId: c.offer_id,
         });
+        // Shirem 12/10 : bouton vers le checkout officiel alors que l'offre était approuvée
+        if (official && suggestion) {
+          c.verdict = "ko";
+          c.detail = `0 commission : le bouton va au site officiel (${new URL(c.target_url ?? "https://x").hostname}) alors qu'une offre est approuvée`;
+        }
       }
 
       await supabase
