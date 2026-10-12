@@ -25,6 +25,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Rankings EMD", href: "/rankings", icon: TrendingUp },
   { name: "Tracking EMD", href: "/tracking", icon: Activity },
+  { name: "Tracking sites expirés", href: "/tracking-expired", icon: Activity },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileSearch },

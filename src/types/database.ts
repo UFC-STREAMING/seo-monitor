@@ -61,6 +61,12 @@ export interface IndexerTaskResults {
 export interface Database {
   public: {
     Tables: {
+      fiche_networks: {
+        Row: { host: string; path: string; targets: string[]; everflow: boolean; scanned_at: string };
+        Insert: { host: string; path: string; targets?: string[]; everflow?: boolean; scanned_at?: string };
+        Update: { host?: string; path?: string; targets?: string[]; everflow?: boolean; scanned_at?: string };
+        Relationships: [];
+      };
       cta_clicks: {
         Row: { id: number; site_id: string | null; domain: string; page_path: string | null; position: string | null; cta_index: number | null; cta_text: string | null; y_pct: number | null; device: string | null; country: string | null; created_at: string };
         Insert: { id?: number; site_id?: string | null; domain: string; page_path?: string | null; position?: string | null; cta_index?: number | null; cta_text?: string | null; y_pct?: number | null; device?: string | null; country?: string | null; created_at?: string };
@@ -1041,6 +1047,14 @@ export interface Database {
     };
 
     Functions: {
+      gsc_page_stats: {
+        Args: { p_days?: number };
+        Returns: { host: string; path: string; clicks: number; impressions: number; position: number | null; top_query: string | null; top_query_position: number | null; top_query_impressions: number | null }[];
+      };
+      gsc_quick_wins: {
+        Args: { p_days?: number };
+        Returns: { host: string; page: string; query: string; impressions: number; clicks: number; position: number }[];
+      };
       latest_keyword_positions: {
         Args: { p_keyword_ids: string[] };
         Returns: { keyword_id: string; position: number | null; checked_at: string }[];
