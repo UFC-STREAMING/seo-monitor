@@ -363,8 +363,13 @@ export async function checkAffiliateLink(
     const everflowNet = EVERFLOW_TRACKING_HOSTS[targetHost.replace(/^www\./, "")];
     if (!everflowNet) {
       const host = targetHost.replace(/^www\./, "");
-      // Vers une de NOS fiches (domaine expiré approuvé) : voulu (décision Leo 07/10)
-      if (ownHosts.has(host)) {
+      // Vers une de NOS fiches (domaine expiré approuvé) : voulu (décision Leo 07/10).
+      // Reconnue si le domaine est suivi ici, ou si la page porte la marque sans que le
+      // domaine la porte (pharmacie-luthringer.fr/produit/alphanerv/ ≠ get.shirem.com).
+      const key = domain.split(".")[0].toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 6);
+      const path = new URL(target).pathname.toLowerCase().replace(/[^a-z0-9/]/g, "");
+      const ourFiche = key.length >= 5 && !host.replace(/[^a-z0-9]/g, "").includes(key) && path.includes(key);
+      if (ownHosts.has(host) || ourFiche) {
         return { ...base, verdict: "ok", target_url: target, detail: `Vers notre fiche ${host} (voulu)` };
       }
       return {
