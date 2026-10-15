@@ -54,8 +54,11 @@ export interface RunResult {
  */
 export async function runPositionChecks(
   supabase: SupabaseClient<Database>,
-  opts: { siteId?: string } = {}
+  opts: { siteId?: string; timeoutMs?: number } = {}
 ): Promise<RunResult> {
+  // Vercel coupe à 300 s : 200 s par défaut. Le relevé quotidien tourne sur le Mac Mini
+  // (scripts/check-positions.ts, launchd) avec un budget large — 107 mots-clés = ~400 s (14/10).
+  const budget = opts.timeoutMs ?? 200_000;
   // 1. Mots-clés éligibles — filtre EMD au niveau SQL
   let query = supabase
     .from("keywords")
@@ -117,7 +120,7 @@ export async function runPositionChecks(
         languageCode: k.language_code,
         targetDomain: k.domain,
       })),
-      { timeoutMs: 200_000 }
+      { timeoutMs: budget }
     );
   } catch (err) {
     if (err instanceof SemscraperBalanceError) balanceError = true;
@@ -137,7 +140,7 @@ export async function runPositionChecks(
   const lost = toCheck
     .map((k, i) => i)
     .filter((i) => !checks[i].error && checks[i].position === null && previousBySite.get(toCheck[i].keyword_id) != null);
-  const remainingMs = 270_000 - (Date.now() - startedAt);
+  const remainingMs = budget + 70_000 - (Date.now() - startedAt);
   if (lost.length && !balanceError && remainingMs > 60_000) {
     try {
       const again = await checkSerpPositions(
