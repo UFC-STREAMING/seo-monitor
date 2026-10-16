@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
         category: "emd",
         serp_tracking_enabled: !!keyword,
         is_active: true,
-        hosting: hosting ?? "cloudflare",
+        hosting: hosting ?? null, // 16/10 : inconnu = vide, pas « cloudflare » (EMD Hostinger affichés Cloudflare)
         registrar: body.registrar ? String(body.registrar) : null,
         location_code: locationCode,
       })
