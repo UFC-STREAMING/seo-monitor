@@ -17,6 +17,7 @@ export async function sendTelegramMessage(text: string, parseMode: "HTML" | "Mar
     const res = await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         chat_id: chatId,
         text,

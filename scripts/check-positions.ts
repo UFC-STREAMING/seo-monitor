@@ -9,6 +9,13 @@ config({ path: ".env.local" });
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runPositionChecks } from "@/lib/positions/check";
 
+// Garde-fou : le 16/10 un relevé est resté figé 3 jours (fetch sans délai max) et launchd
+// ne relance pas un job encore « running ». Au-delà de 30 min, on coupe.
+setTimeout(() => {
+  console.error(`${new Date().toISOString()} relevé coupé après 30 min (bloqué)`);
+  process.exit(1);
+}, 30 * 60_000).unref();
+
 (async () => {
   const t = Date.now();
   const r = await runPositionChecks(createAdminClient(), { timeoutMs: 900_000 });

@@ -108,6 +108,8 @@ function extract(row: SemRow, target: string): SerpCheckResult {
 }
 
 /** Lance les SERP par lots de 100 puis poll ; renvoie les lignes brutes (null = timeout). */
+const FETCH_TIMEOUT_MS = 60_000;
+
 async function runSerpJobs(
   queries: Array<{ keyword: string; countryIso: string; languageCode: string }>,
   timeoutMs: number
@@ -120,6 +122,8 @@ async function runSerpJobs(
     const created = await fetch(`${SEMSCRAPER_API}/serp`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      // Sans délai max, une connexion figée bloquait le relevé pour toujours (16/10 → 19/10).
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       body: JSON.stringify(
         batch.map((q) => ({
           search_engine: "google_search",
@@ -144,8 +148,9 @@ async function runSerpJobs(
       const pending = ids.filter((id) => !done.has(id));
       const res = await fetch(`${SEMSCRAPER_API}/serp?ids=${pending.join(",")}&output=json`, {
         headers: { Authorization: `Bearer ${key}` },
-      });
-      if (!res.ok) continue;
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      }).catch(() => null);
+      if (!res?.ok) continue;
       const json = await parseLoose<{ data?: SemRow[] }>(res);
       for (const row of json.data ?? []) {
         if (row.status === "done") done.set(row.id, row);
