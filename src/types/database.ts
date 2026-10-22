@@ -74,8 +74,8 @@ export interface Database {
         Relationships: [];
       };
       expired_listings: {
-        Row: { id: number; list_date: string; domain: string; platform: string; kind: string; price: string | null; ends_at: string | null; backorder_placed: boolean; placed_at: string | null; created_at: string };
-        Insert: { id?: number; list_date: string; domain: string; platform: string; kind?: string; price?: string | null; ends_at?: string | null; backorder_placed?: boolean; placed_at?: string | null; created_at?: string };
+        Row: { id: number; list_date: string; domain: string; platform: string; kind: string; price: string | null; ends_at: string | null; backorder_placed: boolean; placed_at: string | null; created_at: string; robot_requested: boolean; max_bid: number | null; robot_status: string | null; robot_note: string | null; robot_at: string | null; ends_at_ts: string | null };
+        Insert: { id?: number; list_date: string; domain: string; platform: string; kind?: string; price?: string | null; ends_at?: string | null; backorder_placed?: boolean; placed_at?: string | null; created_at?: string; robot_requested?: boolean; max_bid?: number | null; robot_status?: string | null; robot_note?: string | null; robot_at?: string | null; ends_at_ts?: string | null };
         Update: Partial<Database["public"]["Tables"]["expired_listings"]["Insert"]>;
         Relationships: [];
       };

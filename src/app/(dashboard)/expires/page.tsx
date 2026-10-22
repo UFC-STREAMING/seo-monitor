@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 // Domaines expirés du jour (Leo 22/10/2026) : liste poussée par Dana chaque matin,
-// classée par trafic actuel, puis il y a 6 mois, puis pic. Case cochée = backorder posé sur cette plateforme.
+// classée par trafic actuel, puis il y a 6 mois, puis pic. Catched / Nicsell : case cochée = ordre au robot du Mini
+// (Catched : poser le backorder ; Nicsell : miser le prix max 5 min avant la fin). Autres plateformes : note « posé à la main ».
 
-interface Source { platform: string; kind: string; price: string | null; ends_at: string | null; backorder_placed: boolean }
+interface Source { platform: string; kind: string; price: string | null; ends_at: string | null; ends_at_ts: string | null; backorder_placed: boolean; robot_requested: boolean; max_bid: number | null; robot_status: string | null; robot_note: string | null }
 interface Row {
   domain: string; category?: string; label?: string | null; tld?: string | null;
   traffic_current?: number | null; traffic_6m?: number | null; traffic_peak?: number | null; peak_month?: string | null;
@@ -22,6 +23,23 @@ const nf = (n: number | null | undefined) => (n == null ? "—" : Math.round(n).
 const CAT: Record<string, string> = { medical: "Médical", psy: "Psy", sport: "Sport" };
 const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime" };
 const monthFr = (m: string | null | undefined) => (m ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : "");
+const ROBOT = new Set(["catched", "nicsell"]);
+const STATUS: Record<string, { text: string; cls: string }> = {
+  pending: { text: "robot programmé", cls: "text-amber-600 dark:text-amber-400" },
+  done: { text: "fait par le robot", cls: "text-emerald-600 dark:text-emerald-400" },
+  won: { text: "gagné", cls: "text-emerald-600 dark:text-emerald-400" },
+  lost: { text: "perdu", cls: "text-red-600 dark:text-red-400" },
+  failed: { text: "échec robot", cls: "text-red-600 dark:text-red-400" },
+};
+// Fin la plus proche parmi les plateformes, en heure de Paris
+const firstEnd = (r: Row) => r.sources.map((s) => s.ends_at_ts).filter((x): x is string => !!x).sort()[0] ?? null;
+const fmtEnd = (iso: string) => new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function EndCell({ iso, now }: { iso: string | null; now: number }) {
+  if (!iso) return <span className="text-xs text-muted-foreground">—</span>;
+  const left = now ? new Date(iso).getTime() - now : Infinity;
+  const cls = left < 0 ? "text-muted-foreground line-through" : left < 3 * 3600_000 ? "font-semibold text-red-600 dark:text-red-400" : "";
+  return <span className={`whitespace-nowrap text-xs ${cls}`}>{fmtEnd(iso)}</span>;
+}
 
 // Courbe de trafic : 24 derniers mois, le haut = plus de trafic.
 function TrafficCurve({ series }: { series: { m: string; v: number }[] | null | undefined }) {
@@ -49,6 +67,7 @@ export default function ExpiresPage() {
   const [q, setQ] = useState("");
   const [withTraffic, setWithTraffic] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(0);
 
   const load = useCallback((d?: string) => {
     fetch(`/api/expired${d ? `?date=${d}` : ""}`, { cache: "no-store" })
@@ -57,6 +76,7 @@ export default function ExpiresPage() {
         if (!res.ok) throw new Error(json.error ?? String(res.status));
         setError(null);
         setData(json);
+        setNow(Date.now());
         if (json.date) setDate(json.date);
       })
       .catch((e) => setError(`Chargement impossible (${e instanceof Error ? e.message : e})`));
@@ -64,7 +84,7 @@ export default function ExpiresPage() {
   useEffect(() => {
     fetch("/api/expired", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((json: Resp) => { setData(json); if (json.date) setDate(json.date); })
+      .then((json: Resp) => { setData(json); setNow(Date.now()); if (json.date) setDate(json.date); })
       .catch((e) => setError(`Chargement impossible (${e})`));
   }, []);
 
@@ -86,12 +106,29 @@ export default function ExpiresPage() {
     return c;
   }, [data]);
 
-  async function toggle(domain: string, s: Source) {
+  const patch = (domain: string, platform: string, changes: Partial<Source>) =>
+    setData((prev) => prev && { ...prev, rows: prev.rows.map((r) => r.domain !== domain ? r : { ...r, sources: r.sources.map((x) => x.platform === platform ? { ...x, ...changes } : x) }) });
+  const [bids, setBids] = useState<Record<string, string>>({});
+
+  async function send(body: Record<string, unknown>) {
+    const res = await fetch("/api/expired", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ list_date: date, ...body }) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) { toast.error(json.error ?? "Non enregistré"); load(date); return false; }
+    return true;
+  }
+  async function togglePlaced(domain: string, s: Source) {
     const placed = !s.backorder_placed;
-    setData((prev) => prev && { ...prev, rows: prev.rows.map((r) => r.domain !== domain ? r : { ...r, sources: r.sources.map((x) => x.platform === s.platform ? { ...x, backorder_placed: placed } : x) }) });
-    const res = await fetch("/api/expired", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ list_date: date, domain, platform: s.platform, placed }) });
-    if (!res.ok) { toast.error("Case non enregistrée"); load(date); }
-    else toast.success(placed ? `Backorder posé : ${domain} sur ${PLATFORM[s.platform] ?? s.platform}` : "Case décochée");
+    patch(domain, s.platform, { backorder_placed: placed });
+    if (await send({ action: "placed", domain, platform: s.platform, placed })) toast.success(placed ? `Noté : posé sur ${PLATFORM[s.platform] ?? s.platform}` : "Case décochée");
+  }
+  async function toggleRobot(domain: string, s: Source) {
+    const robot = !s.robot_requested;
+    const key = `${domain}|${s.platform}`;
+    const maxBid = s.platform === "nicsell" ? Number((bids[key] ?? s.max_bid ?? "").toString().replace(",", ".")) || null : null;
+    if (robot && s.platform === "nicsell" && !(maxBid && maxBid >= 10)) { toast.error("Mets d’abord ton prix max (10 € minimum)"); return; }
+    patch(domain, s.platform, { robot_requested: robot, max_bid: maxBid, robot_status: robot ? "pending" : "cancelled" });
+    if (await send({ action: "robot", domain, platform: s.platform, robot, max_bid: maxBid }))
+      toast.success(!robot ? "Robot annulé" : s.platform === "nicsell" ? `Robot : mise de ${maxBid} € max sur ${domain} 5 min avant la fin` : `Robot : backorder Catched sur ${domain}`);
   }
 
   return (
@@ -131,7 +168,8 @@ export default function ExpiresPage() {
                     <TableHead className="text-right">Il y a 6 mois</TableHead>
                     <TableHead className="text-right">Pic</TableHead>
                     <TableHead>Courbe (24 mois)</TableHead>
-                    <TableHead>Disponible sur (cocher = backorder posé)</TableHead>
+                    <TableHead>Fin (Paris)</TableHead>
+                    <TableHead>Disponible sur — Catched / Nicsell : cocher = robot ; autres : posé à la main</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -148,15 +186,44 @@ export default function ExpiresPage() {
                       <TableCell className="text-right tabular-nums">{r.traffic_checked_at ? nf(r.traffic_6m) : ""}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.traffic_checked_at ? <>{nf(r.traffic_peak)} <span className="text-xs text-muted-foreground">{monthFr(r.peak_month)}</span></> : ""}</TableCell>
                       <TableCell><TrafficCurve series={r.traffic_series} /></TableCell>
+                      <TableCell><EndCell iso={firstEnd(r)} now={now} /></TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5">
-                          {r.sources.map((s) => (
-                            <label key={s.platform} className={`flex cursor-pointer items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${s.backorder_placed ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950" : ""}`} title={s.ends_at ? `Fin : ${s.ends_at}` : undefined}>
-                              <input type="checkbox" checked={s.backorder_placed} onChange={() => toggle(r.domain, s)} />
-                              <span className="font-medium">{PLATFORM[s.platform] ?? s.platform}</span>
-                              <span className="text-muted-foreground">{s.kind === "auction" ? "enchère" : "backorder"}{s.price ? ` · ${s.price}` : ""}</span>
-                            </label>
-                          ))}
+                          {r.sources.map((s) => {
+                            const key = `${r.domain}|${s.platform}`;
+                            const st = s.robot_requested && s.robot_status ? STATUS[s.robot_status] : null;
+                            const ok = s.backorder_placed || s.robot_status === "done" || s.robot_status === "won";
+                            return (
+                              <div key={s.platform} className={`flex flex-col gap-0.5 rounded-md border px-2 py-1 text-xs ${ok ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950" : s.robot_requested ? "border-amber-500" : ""}`} title={[s.ends_at ? `Fin : ${s.ends_at}` : "", s.robot_note ?? ""].filter(Boolean).join("\n") || undefined}>
+                                <div className="flex items-center gap-1">
+                                  <span className="font-medium">{PLATFORM[s.platform] ?? s.platform}</span>
+                                  <span className="text-muted-foreground">{s.kind === "auction" ? "enchère" : "backorder"}{s.price ? ` · ${s.price}` : ""}</span>
+                                </div>
+                                {ROBOT.has(s.platform) ? (
+                                  <div className="flex items-center gap-1">
+                                    {s.platform === "nicsell" && (
+                                      <input type="number" min={10} step={1} placeholder="max €" aria-label={`Prix max Nicsell pour ${r.domain}`}
+                                        className="h-6 w-16 rounded border bg-background px-1"
+                                        value={bids[key] ?? (s.max_bid ?? "")}
+                                        disabled={s.robot_requested}
+                                        onChange={(e) => setBids((b) => ({ ...b, [key]: e.target.value }))} />
+                                    )}
+                                    <label className="flex cursor-pointer items-center gap-1">
+                                      <input type="checkbox" checked={s.robot_requested} onChange={() => toggleRobot(r.domain, s)} />
+                                      <span>🤖 {s.platform === "nicsell" ? "miser" : "backorder"}</span>
+                                    </label>
+                                  </div>
+                                ) : (
+                                  <label className="flex cursor-pointer items-center gap-1">
+                                    <input type="checkbox" checked={s.backorder_placed} onChange={() => togglePlaced(r.domain, s)} />
+                                    <span>posé à la main</span>
+                                  </label>
+                                )}
+                                {st && <span className={st.cls}>{st.text}{s.robot_note ? ` — ${s.robot_note}` : ""}</span>}
+                                {!st && s.backorder_placed && ROBOT.has(s.platform) && <span className="text-emerald-600 dark:text-emerald-400">posé</span>}
+                              </div>
+                            );
+                          })}
                         </div>
                       </TableCell>
                     </TableRow>

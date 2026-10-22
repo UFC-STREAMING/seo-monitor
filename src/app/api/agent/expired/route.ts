@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchTraffic, summarize, type DomainTraffic } from "@/lib/expired/traffic";
+import { parseEndsAt } from "@/lib/expired/ends-at";
 
 export const maxDuration = 300;
 
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
         kind: s.kind === "auction" ? "auction" : "backorder",
         price: s.price ?? null,
         ends_at: s.ends_at ?? null,
+        ends_at_ts: parseEndsAt(s.ends_at),
       })),
   );
   const uniq = [...new Map(listings.map((l) => [`${l.domain}|${l.platform}`, l])).values()];
