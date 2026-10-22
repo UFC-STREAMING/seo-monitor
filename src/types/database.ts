@@ -67,6 +67,18 @@ export interface Database {
         Update: { status?: string | null; payout?: number | null };
         Relationships: [];
       };
+      expired_domains: {
+        Row: { domain: string; category: string; label: string | null; tld: string | null; traffic_current: number | null; traffic_6m: number | null; traffic_peak: number | null; peak_month: string | null; traffic_series: { m: string; v: number }[] | null; traffic_checked_at: string | null; first_seen: string; last_seen: string };
+        Insert: { domain: string; category?: string; label?: string | null; tld?: string | null; traffic_current?: number | null; traffic_6m?: number | null; traffic_peak?: number | null; peak_month?: string | null; traffic_series?: { m: string; v: number }[] | null; traffic_checked_at?: string | null; first_seen?: string; last_seen?: string };
+        Update: Partial<Database["public"]["Tables"]["expired_domains"]["Insert"]>;
+        Relationships: [];
+      };
+      expired_listings: {
+        Row: { id: number; list_date: string; domain: string; platform: string; kind: string; price: string | null; ends_at: string | null; backorder_placed: boolean; placed_at: string | null; created_at: string };
+        Insert: { id?: number; list_date: string; domain: string; platform: string; kind?: string; price?: string | null; ends_at?: string | null; backorder_placed?: boolean; placed_at?: string | null; created_at?: string };
+        Update: Partial<Database["public"]["Tables"]["expired_listings"]["Insert"]>;
+        Relationships: [];
+      };
       fiche_networks: {
         Row: { host: string; path: string; targets: string[]; everflow: boolean; scanned_at: string };
         Insert: { host: string; path: string; targets?: string[]; everflow?: boolean; scanned_at?: string };
