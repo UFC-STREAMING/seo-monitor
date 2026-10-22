@@ -20,7 +20,7 @@ interface Row {
 interface Resp { dates: string[]; date: string | null; rows: Row[] }
 
 const nf = (n: number | null | undefined) => (n == null ? "—" : Math.round(n).toLocaleString("fr-FR"));
-const CAT: Record<string, string> = { medical: "Médical", sport: "Sport", local: "Local .fr", psy: "Psy" };
+const CAT: Record<string, string> = { medical: "Médical", sport: "Sport", psy: "Psy" };
 const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime" };
 const monthFr = (m: string | null | undefined) => (m ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : "");
 const ROBOT = new Set(["catched", "nicsell"]);
@@ -63,11 +63,11 @@ function TrafficCurve({ series }: { series: { m: string; v: number }[] | null | 
 export default function ExpiresPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [date, setDate] = useState<string>("");
-  const [cat, setCat] = useState<"all" | "medical" | "sport" | "local">(() => {
-    // Lien direct : /expires?cat=local (ou medical, sport)
+  const [cat, setCat] = useState<"all" | "medical" | "sport">(() => {
+    // Lien direct : /expires?cat=medical ou ?cat=sport
     if (typeof window === "undefined") return "all";
     const c = new URLSearchParams(window.location.search).get("cat");
-    return c === "medical" || c === "sport" || c === "local" ? c : "all";
+    return c === "medical" || c === "sport" ? c : "all";
   });
   const [q, setQ] = useState("");
   const [withTraffic, setWithTraffic] = useState(false);
@@ -107,7 +107,7 @@ export default function ExpiresPage() {
   }, [data, cat, q, withTraffic]);
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: 0, medical: 0, sport: 0, local: 0 };
+    const c: Record<string, number> = { all: 0, medical: 0, sport: 0 };
     for (const r of data?.rows ?? []) { if (r.category === "psy") continue; c.all++; c[r.category ?? "medical"] = (c[r.category ?? "medical"] ?? 0) + 1; }
     return c;
   }, [data]);
@@ -151,7 +151,7 @@ export default function ExpiresPage() {
             {(data?.dates ?? []).map((d) => <option key={d} value={d}>{new Date(d + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })}</option>)}
           </select>
           <div className="flex gap-1">
-            {(["all", "medical", "sport", "local"] as const).map((c) => (
+            {(["all", "medical", "sport"] as const).map((c) => (
               <button key={c} onClick={() => { setCat(c); window.history.replaceState(null, "", c === "all" ? "/expires" : `/expires?cat=${c}`); }} className={`rounded-md border px-2.5 py-1 text-sm ${cat === c ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
                 {c === "all" ? "Tous" : CAT[c]} <span className="opacity-70">{counts[c] ?? 0}</span>
               </button>
