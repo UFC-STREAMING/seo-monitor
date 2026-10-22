@@ -12,7 +12,7 @@ export const maxDuration = 300;
 //   "date": "2026-10-22",                      // jour de la liste (Europe/Paris)
 //   "domains": [{
 //     "domain": "iris-radiologie.ch",
-//     "category": "medical" | "psy" | "sport",
+//     "category": "medical" | "sport" | "local",
 //     "label": "radiologie",                   // type + ville en français
 //     "sources": [{ "platform": "catched", "kind": "backorder" | "auction", "price": "40 € HT", "ends_at": "2026-10-22 00:00" }],
 //     "traffic_series": [{ "m": "2026-09", "v": 120 }]   // optionnel : trafic déjà relevé, évite de repayer
@@ -21,7 +21,7 @@ export const maxDuration = 300;
 // }
 // Idempotent : renvoyer la même liste met à jour prix / fins sans toucher aux cases « backorder posé ».
 const PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "dynadot", "domainorder", "realtime"]);
-const CATEGORIES = new Set(["medical", "psy", "sport"]);
+const CATEGORIES = new Set(["medical", "psy", "sport", "local"]);
 const STALE_MS = 7 * 24 * 3600 * 1000;
 
 type Source = { platform?: string; kind?: string; price?: string | null; ends_at?: string | null };
@@ -104,8 +104,10 @@ export async function POST(request: NextRequest) {
   // Trafic : seulement les domaines jamais relevés ou relevés il y a plus de 7 jours
   let traffic: { checked: number; cost_usd: number; error?: string } = { checked: 0, cost_usd: 0 };
   if (body.fetch_traffic !== false) {
+    // Les locaux .fr partent dans l'outil local de Leo : pas de relevé de trafic payant pour eux.
+    const localSet = new Set(rows.filter((r) => r.category === "local").map((r) => r.domain));
     const todo = names.filter((n) => {
-      if (given.has(n)) return false;
+      if (given.has(n) || localSet.has(n)) return false;
       const at = known.get(n)?.traffic_checked_at;
       return !at || Date.now() - new Date(at).getTime() > STALE_MS;
     });
