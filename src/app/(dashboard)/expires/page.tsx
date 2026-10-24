@@ -144,6 +144,16 @@ export default function ExpiresPage() {
         <p className="text-muted-foreground text-sm">Liste du jour envoyée par Dana. Classement : trafic actuel, puis il y a 6 mois, puis pic. Trafic Google estimé par DataForSEO (indication, pas des visites réelles).</p>
       </div>
 
+      {/* Garde-fou (24/10) : clé treg refusée 2 jours sans que personne ne le voie → on affiche le trou ici */}
+      {(() => {
+        const unchecked = (data?.rows ?? []).filter((r) => !r.traffic_checked_at).length;
+        return unchecked > 0 && (
+          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+            <strong>Trafic non relevé pour {unchecked} domaine{unchecked > 1 ? "s" : ""}</strong> sur {data?.rows.length}. Le relevé DataForSEO (via treg) a échoué : clé treg ou solde à vérifier.
+          </div>
+        );
+      })()}
+
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
           <CardTitle className="mr-auto text-base">{rows.length} domaines</CardTitle>

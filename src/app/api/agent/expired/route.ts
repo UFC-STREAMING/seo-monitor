@@ -112,11 +112,14 @@ export async function POST(request: NextRequest) {
     if (todo.length) {
       try {
         const { results, costUsd } = await fetchTraffic(todo);
-        for (const t of results) {
-          await supabase.from("expired_domains").update({
-            traffic_current: t.current, traffic_6m: t.six_months, traffic_peak: t.peak,
-            peak_month: t.peak_month, traffic_series: t.series, traffic_checked_at: now,
-          }).eq("domain", t.domain);
+        // Écriture groupée : 1 000 updates un par un dépassaient la limite Vercel de 300 s
+        const updates = results.map((t) => ({
+          domain: t.domain, traffic_current: t.current, traffic_6m: t.six_months, traffic_peak: t.peak,
+          peak_month: t.peak_month, traffic_series: t.series, traffic_checked_at: now,
+        }));
+        for (let i = 0; i < updates.length; i += 500) {
+          const { error } = await supabase.from("expired_domains").upsert(updates.slice(i, i + 500), { onConflict: "domain" });
+          if (error) throw new Error(`Supabase ${error.message}`);
         }
         traffic = { checked: results.length, cost_usd: costUsd };
       } catch (e) {
