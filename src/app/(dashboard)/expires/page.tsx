@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 // Domaines expirés du jour (Leo 22/10/2026) : liste poussée par Dana chaque matin,
 // classée par trafic actuel, puis il y a 6 mois, puis pic. Catched / Nicsell : case cochée = ordre au robot du Mini
-// (Catched : poser le backorder ; Nicsell : miser le prix max 5 min avant la fin). Autres plateformes : note « posé à la main ».
+// (Nicsell / Dynadot : robot ; Catched : rappel Telegram, pas d API). Autres plateformes : note « posé à la main ».
 
 interface Source { platform: string; kind: string; price: string | null; ends_at: string | null; ends_at_ts: string | null; backorder_placed: boolean; robot_requested: boolean; max_bid: number | null; robot_status: string | null; robot_note: string | null; listed?: boolean } // kind "extra" = plateforme cochée par Leo sans être listée par Dana
 interface Row {
@@ -23,7 +23,9 @@ const nf = (n: number | null | undefined) => (n == null ? "—" : Math.round(n).
 const CAT: Record<string, string> = { medical: "Médical", sport: "Sport", psy: "Psy" };
 const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime" };
 const monthFr = (m: string | null | undefined) => (m ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : "");
-const ROBOT = new Set(["catched", "nicsell"]);
+const ROBOT = new Set(["catched", "nicsell", "dynadot"]);
+// Prix max à saisir : Nicsell (€) et enchères Dynadot ($)
+const needsMax = (s: { platform: string; kind: string }) => s.platform === "nicsell" || (s.platform === "dynadot" && s.kind === "auction");
 // Plateformes cochables même si Dana ne les a pas listées (Leo 24/10) : Catched + Nicsell partout, WebExpire + Bloomup pour les .fr
 const extraPlatforms = (domain: string) => ["catched", "nicsell", ...(domain.endsWith(".fr") ? ["webexpire", "bloomup"] : [])];
 const blankSource = (platform: string): Source => ({ platform, kind: "extra", price: null, ends_at: null, ends_at_ts: null, backorder_placed: false, robot_requested: false, max_bid: null, robot_status: null, robot_note: null });
@@ -146,11 +148,15 @@ export default function ExpiresPage() {
   async function toggleRobot(domain: string, s: Source) {
     const robot = !s.robot_requested;
     const key = `${domain}|${s.platform}`;
-    const maxBid = s.platform === "nicsell" ? Number((bids[key] ?? s.max_bid ?? "").toString().replace(",", ".")) || null : null;
+    const maxBid = needsMax(s) ? Number((bids[key] ?? s.max_bid ?? "").toString().replace(",", ".")) || null : null;
     if (robot && s.platform === "nicsell" && !(maxBid && maxBid >= 10)) { toast.error("Mets d’abord ton prix max (10 € minimum)"); return; }
+    if (robot && needsMax(s) && !(maxBid && maxBid > 0)) { toast.error("Mets d’abord ton prix max en $"); return; }
     patch(domain, s.platform, { robot_requested: robot, max_bid: maxBid, robot_status: robot ? "pending" : "cancelled" });
-    if (await send({ action: "robot", domain, platform: s.platform, robot, max_bid: maxBid }))
-      toast.success(!robot ? "Robot annulé" : s.platform === "nicsell" ? `Robot : mise de ${maxBid} € max sur ${domain} 5 min avant la fin` : `Robot : backorder Catched sur ${domain}`);
+    if (await send({ action: "robot", domain, platform: s.platform, kind: s.kind, robot, max_bid: maxBid }))
+      toast.success(!robot ? "Robot annulé"
+        : s.platform === "nicsell" ? `Robot : mise de ${maxBid} € max sur ${domain} 5 min avant la fin`
+        : s.platform === "dynadot" ? (s.kind === "auction" ? `Robot : mise de ${maxBid} $ max sur ${domain} 5 min avant la fin` : `Robot : backorder Dynadot sur ${domain}`)
+        : `Catched : rappel Telegram 1 h avant la fin pour ${domain}`);
   }
 
   async function toggleRegfree(domain: string, s: Source | undefined) {
@@ -207,7 +213,7 @@ export default function ExpiresPage() {
                     <TableHead className="text-right">Pic</TableHead>
                     <TableHead>Courbe (24 mois)</TableHead>
                     <TableHead>Fin (Paris)</TableHead>
-                    <TableHead>Plateformes — Catched / Nicsell listés : cocher = robot ; sinon : posé à la main (coche autant de plateformes que tu veux)</TableHead>
+                    <TableHead>Plateformes — 🤖 Nicsell / Dynadot = robot ; ⏰ Catched = rappel Telegram 1 h avant ; sinon posé à la main (coche autant de plateformes que tu veux)</TableHead>
                     <TableHead title="Si personne ne le capte et qu’il redevient libre : achat automatique chez Openprovider + message Telegram">Regfree</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -240,8 +246,8 @@ export default function ExpiresPage() {
                                 </div>
                                 {ROBOT.has(s.platform) && s.listed ? (
                                   <div className="flex items-center gap-1">
-                                    {s.platform === "nicsell" && (
-                                      <input type="number" min={10} step={1} placeholder="max €" aria-label={`Prix max Nicsell pour ${r.domain}`}
+                                    {needsMax(s) && (
+                                      <input type="number" min={s.platform === "nicsell" ? 10 : 1} step={1} placeholder={s.platform === "nicsell" ? "max €" : "max $"} aria-label={`Prix max ${PLATFORM[s.platform]} pour ${r.domain}`}
                                         className="h-6 w-16 rounded border bg-background px-1"
                                         value={bids[key] ?? (s.max_bid ?? "")}
                                         disabled={s.robot_requested}
@@ -249,7 +255,7 @@ export default function ExpiresPage() {
                                     )}
                                     <label className="flex cursor-pointer items-center gap-1">
                                       <input type="checkbox" checked={s.robot_requested} onChange={() => toggleRobot(r.domain, s)} />
-                                      <span>🤖 {s.platform === "nicsell" ? "miser" : "backorder"}</span>
+                                      <span>{s.platform === "catched" ? "⏰ rappel" : `🤖 ${needsMax(s) ? "miser" : "backorder"}`}</span>
                                     </label>
                                   </div>
                                 ) : (

@@ -48,13 +48,13 @@ export async function GET(request: NextRequest) {
 //   { action: "placed", placed }            → note « backorder posé à la main » (crée la ligne si la plateforme n'était pas listée)
 //   { action: "robot", robot, max_bid? }    → ordre au robot du Mini (Catched : poser le backorder ; Nicsell : miser max_bid 5 min avant la fin)
 //   { action: "regfree", watch }            → plateforme « regfree » : le sniper du Mini achète chez Openprovider dès que le domaine est libre
-const ROBOT_PLATFORMS = new Set(["catched", "nicsell"]);
+const ROBOT_PLATFORMS = new Set(["catched", "nicsell", "dynadot"]);
 // Plateformes qu'on peut cocher même si Dana ne les a pas listées (Leo 24/10 : un .fr est sur Catched, Nicsell ET WebExpire)
 const EXTRA_PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "regfree"]);
 
 export async function POST(request: NextRequest) {
   if (!(await requireUser())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => null) as { action?: string; list_date?: string; domain?: string; platform?: string; placed?: boolean; robot?: boolean; watch?: boolean; max_bid?: number | null } | null;
+  const body = await request.json().catch(() => null) as { action?: string; list_date?: string; domain?: string; platform?: string; placed?: boolean; robot?: boolean; watch?: boolean; kind?: string; max_bid?: number | null } | null;
   if (!body?.list_date || !body.domain || !body.platform) return NextResponse.json({ error: "list_date, domain, platform requis" }, { status: 400 });
 
   let update: Record<string, unknown>;
@@ -63,10 +63,11 @@ export async function POST(request: NextRequest) {
     const watch = !!body.watch;
     update = { robot_requested: watch, robot_status: watch ? "pending" : "cancelled", robot_note: watch ? "surveillé chaque minute, achat Openprovider dès qu'il est libre" : "annulé par Leo", robot_at: new Date().toISOString() };
   } else if (body.action === "robot") {
-    if (!ROBOT_PLATFORMS.has(body.platform)) return NextResponse.json({ error: "Robot disponible seulement sur Catched et Nicsell" }, { status: 400 });
+    if (!ROBOT_PLATFORMS.has(body.platform)) return NextResponse.json({ error: "Robot disponible seulement sur Catched, Nicsell et Dynadot" }, { status: 400 });
     const robot = !!body.robot;
     const maxBid = body.max_bid == null ? null : Number(body.max_bid);
     if (robot && body.platform === "nicsell" && !(maxBid && maxBid >= 10)) return NextResponse.json({ error: "Prix max Nicsell requis (10 € minimum)" }, { status: 400 });
+    if (robot && body.platform === "dynadot" && body.kind === "auction" && !(maxBid && maxBid > 0)) return NextResponse.json({ error: "Prix max Dynadot requis (en $)" }, { status: 400 });
     update = { robot_requested: robot, max_bid: maxBid, robot_status: robot ? "pending" : "cancelled", robot_note: robot ? null : "annulé par Leo", robot_at: new Date().toISOString() };
   } else {
     const placed = !!body.placed;
