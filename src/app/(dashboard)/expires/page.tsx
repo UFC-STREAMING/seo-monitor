@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 // classée par trafic actuel, puis il y a 6 mois, puis pic. Catched / Nicsell : case cochée = ordre au robot du Mini
 // (Catched : poser le backorder ; Nicsell : miser le prix max 5 min avant la fin). Autres plateformes : note « posé à la main ».
 
-interface Source { platform: string; kind: string; price: string | null; ends_at: string | null; ends_at_ts: string | null; backorder_placed: boolean; robot_requested: boolean; max_bid: number | null; robot_status: string | null; robot_note: string | null }
+interface Source { platform: string; kind: string; price: string | null; ends_at: string | null; ends_at_ts: string | null; backorder_placed: boolean; robot_requested: boolean; max_bid: number | null; robot_status: string | null; robot_note: string | null; listed?: boolean } // kind "extra" = plateforme cochée par Leo sans être listée par Dana
 interface Row {
   domain: string; category?: string; label?: string | null; tld?: string | null;
   traffic_current?: number | null; traffic_6m?: number | null; traffic_peak?: number | null; peak_month?: string | null;
@@ -24,6 +24,20 @@ const CAT: Record<string, string> = { medical: "Médical", sport: "Sport", psy: 
 const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime" };
 const monthFr = (m: string | null | undefined) => (m ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : "");
 const ROBOT = new Set(["catched", "nicsell"]);
+// Plateformes cochables même si Dana ne les a pas listées (Leo 24/10) : Catched + Nicsell partout, WebExpire + Bloomup pour les .fr
+const extraPlatforms = (domain: string) => ["catched", "nicsell", ...(domain.endsWith(".fr") ? ["webexpire", "bloomup"] : [])];
+const blankSource = (platform: string): Source => ({ platform, kind: "extra", price: null, ends_at: null, ends_at_ts: null, backorder_placed: false, robot_requested: false, max_bid: null, robot_status: null, robot_note: null });
+// Sources affichées : celles listées par Dana + les plateformes compatibles non listées (cochage manuel seulement)
+const shownSources = (r: Row) => {
+  const listed = r.sources.filter((s) => s.platform !== "regfree").map((s) => ({ ...s, listed: s.kind !== "extra" }));
+  const have = new Set(listed.map((s) => s.platform));
+  return [...listed, ...extraPlatforms(r.domain).filter((p) => !have.has(p)).map(blankSource)];
+};
+const REGFREE: Record<string, { text: string; cls: string }> = {
+  pending: { text: "surveillé chaque minute", cls: "text-amber-600 dark:text-amber-400" },
+  done: { text: "ACHETÉ (Openprovider)", cls: "font-semibold text-emerald-600 dark:text-emerald-400" },
+  failed: { text: "échec achat", cls: "text-red-600 dark:text-red-400" },
+};
 const STATUS: Record<string, { text: string; cls: string }> = {
   pending: { text: "robot programmé", cls: "text-amber-600 dark:text-amber-400" },
   done: { text: "fait par le robot", cls: "text-emerald-600 dark:text-emerald-400" },
@@ -113,7 +127,9 @@ export default function ExpiresPage() {
   }, [data]);
 
   const patch = (domain: string, platform: string, changes: Partial<Source>) =>
-    setData((prev) => prev && { ...prev, rows: prev.rows.map((r) => r.domain !== domain ? r : { ...r, sources: r.sources.map((x) => x.platform === platform ? { ...x, ...changes } : x) }) });
+    setData((prev) => prev && { ...prev, rows: prev.rows.map((r) => r.domain !== domain ? r : { ...r, sources: r.sources.some((x) => x.platform === platform)
+      ? r.sources.map((x) => x.platform === platform ? { ...x, ...changes } : x)
+      : [...r.sources, { ...blankSource(platform), ...changes }] }) });
   const [bids, setBids] = useState<Record<string, string>>({});
 
   async function send(body: Record<string, unknown>) {
@@ -135,6 +151,12 @@ export default function ExpiresPage() {
     patch(domain, s.platform, { robot_requested: robot, max_bid: maxBid, robot_status: robot ? "pending" : "cancelled" });
     if (await send({ action: "robot", domain, platform: s.platform, robot, max_bid: maxBid }))
       toast.success(!robot ? "Robot annulé" : s.platform === "nicsell" ? `Robot : mise de ${maxBid} € max sur ${domain} 5 min avant la fin` : `Robot : backorder Catched sur ${domain}`);
+  }
+
+  async function toggleRegfree(domain: string, s: Source | undefined) {
+    const watch = !s?.robot_requested;
+    patch(domain, "regfree", { robot_requested: watch, robot_status: watch ? "pending" : "cancelled", robot_note: null });
+    if (await send({ action: "regfree", domain, platform: "regfree", watch })) toast.success(watch ? `Regfree : ${domain} acheté chez Openprovider dès qu’il est libre` : "Surveillance regfree annulée");
   }
 
   return (
@@ -185,7 +207,8 @@ export default function ExpiresPage() {
                     <TableHead className="text-right">Pic</TableHead>
                     <TableHead>Courbe (24 mois)</TableHead>
                     <TableHead>Fin (Paris)</TableHead>
-                    <TableHead>Disponible sur — Catched / Nicsell : cocher = robot ; autres : posé à la main</TableHead>
+                    <TableHead>Plateformes — Catched / Nicsell listés : cocher = robot ; sinon : posé à la main (coche autant de plateformes que tu veux)</TableHead>
+                    <TableHead title="Si personne ne le capte et qu’il redevient libre : achat automatique chez Openprovider + message Telegram">Regfree</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -205,7 +228,7 @@ export default function ExpiresPage() {
                       <TableCell><EndCell iso={firstEnd(r)} now={now} /></TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1.5">
-                          {r.sources.map((s) => {
+                          {shownSources(r).map((s) => {
                             const key = `${r.domain}|${s.platform}`;
                             const st = s.robot_requested && s.robot_status ? STATUS[s.robot_status] : null;
                             const ok = s.backorder_placed || s.robot_status === "done" || s.robot_status === "won";
@@ -213,9 +236,9 @@ export default function ExpiresPage() {
                               <div key={s.platform} className={`flex flex-col gap-0.5 rounded-md border px-2 py-1 text-xs ${ok ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950" : s.robot_requested ? "border-amber-500" : ""}`} title={[s.ends_at ? `Fin : ${s.ends_at}` : "", s.robot_note ?? ""].filter(Boolean).join("\n") || undefined}>
                                 <div className="flex items-center gap-1">
                                   <span className="font-medium">{PLATFORM[s.platform] ?? s.platform}</span>
-                                  <span className="text-muted-foreground">{s.kind === "auction" ? "enchère" : "backorder"}{s.price ? ` · ${s.price}` : ""}</span>
+                                  <span className="text-muted-foreground">{!s.listed ? "non listé" : s.kind === "auction" ? "enchère" : "backorder"}{s.price ? ` · ${s.price}` : ""}</span>
                                 </div>
-                                {ROBOT.has(s.platform) ? (
+                                {ROBOT.has(s.platform) && s.listed ? (
                                   <div className="flex items-center gap-1">
                                     {s.platform === "nicsell" && (
                                       <input type="number" min={10} step={1} placeholder="max €" aria-label={`Prix max Nicsell pour ${r.domain}`}
@@ -236,11 +259,26 @@ export default function ExpiresPage() {
                                   </label>
                                 )}
                                 {st && <span className={st.cls}>{st.text}{s.robot_note ? ` — ${s.robot_note}` : ""}</span>}
-                                {!st && s.backorder_placed && ROBOT.has(s.platform) && <span className="text-emerald-600 dark:text-emerald-400">posé</span>}
+                                {!st && s.backorder_placed && ROBOT.has(s.platform) && s.listed && <span className="text-emerald-600 dark:text-emerald-400">posé</span>}
                               </div>
                             );
                           })}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const rf = r.sources.find((s) => s.platform === "regfree");
+                          const st = rf?.robot_requested && rf.robot_status ? REGFREE[rf.robot_status] : null;
+                          return (
+                            <div className="flex flex-col gap-0.5 text-xs" title={rf?.robot_note ?? undefined}>
+                              <label className="flex cursor-pointer items-center gap-1 whitespace-nowrap">
+                                <input type="checkbox" checked={!!rf?.robot_requested} disabled={rf?.robot_status === "done"} onChange={() => toggleRegfree(r.domain, rf)} />
+                                <span>acheter si libre</span>
+                              </label>
+                              {st && <span className={st.cls}>{st.text}</span>}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                     </TableRow>
                   ))}

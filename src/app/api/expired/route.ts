@@ -45,17 +45,24 @@ export async function GET(request: NextRequest) {
 }
 
 // Actions de Leo sur une plateforme :
-//   { action: "placed", placed }            → note « backorder posé à la main »
+//   { action: "placed", placed }            → note « backorder posé à la main » (crée la ligne si la plateforme n'était pas listée)
 //   { action: "robot", robot, max_bid? }    → ordre au robot du Mini (Catched : poser le backorder ; Nicsell : miser max_bid 5 min avant la fin)
+//   { action: "regfree", watch }            → plateforme « regfree » : le sniper du Mini achète chez Openprovider dès que le domaine est libre
 const ROBOT_PLATFORMS = new Set(["catched", "nicsell"]);
+// Plateformes qu'on peut cocher même si Dana ne les a pas listées (Leo 24/10 : un .fr est sur Catched, Nicsell ET WebExpire)
+const EXTRA_PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "regfree"]);
 
 export async function POST(request: NextRequest) {
   if (!(await requireUser())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => null) as { action?: string; list_date?: string; domain?: string; platform?: string; placed?: boolean; robot?: boolean; max_bid?: number | null } | null;
+  const body = await request.json().catch(() => null) as { action?: string; list_date?: string; domain?: string; platform?: string; placed?: boolean; robot?: boolean; watch?: boolean; max_bid?: number | null } | null;
   if (!body?.list_date || !body.domain || !body.platform) return NextResponse.json({ error: "list_date, domain, platform requis" }, { status: 400 });
 
   let update: Record<string, unknown>;
-  if (body.action === "robot") {
+  if (body.action === "regfree") body.platform = "regfree";
+  if (body.action === "regfree") {
+    const watch = !!body.watch;
+    update = { robot_requested: watch, robot_status: watch ? "pending" : "cancelled", robot_note: watch ? "surveillé chaque minute, achat Openprovider dès qu'il est libre" : "annulé par Leo", robot_at: new Date().toISOString() };
+  } else if (body.action === "robot") {
     if (!ROBOT_PLATFORMS.has(body.platform)) return NextResponse.json({ error: "Robot disponible seulement sur Catched et Nicsell" }, { status: 400 });
     const robot = !!body.robot;
     const maxBid = body.max_bid == null ? null : Number(body.max_bid);
@@ -65,8 +72,16 @@ export async function POST(request: NextRequest) {
     const placed = !!body.placed;
     update = { backorder_placed: placed, placed_at: placed ? new Date().toISOString() : null };
   }
-  const { error } = await createAdminClient().from("expired_listings").update(update)
-    .eq("list_date", body.list_date).eq("domain", body.domain).eq("platform", body.platform);
+  const admin = createAdminClient();
+  if (EXTRA_PLATFORMS.has(body.platform)) {
+    // Ligne absente (plateforme non listée par Dana) → on la crée, sans toucher à une ligne existante
+    const { error: e0 } = await admin.from("expired_listings")
+      .upsert({ list_date: body.list_date, domain: body.domain, platform: body.platform, kind: "extra" }, { onConflict: "list_date,domain,platform", ignoreDuplicates: true });
+    if (e0) return NextResponse.json({ error: e0.message }, { status: 500 });
+  }
+  const { data, error } = await admin.from("expired_listings").update(update)
+    .eq("list_date", body.list_date).eq("domain", body.domain).eq("platform", body.platform).select("id");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data?.length) return NextResponse.json({ error: "Ligne introuvable" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
