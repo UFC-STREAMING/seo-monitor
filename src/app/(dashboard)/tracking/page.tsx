@@ -96,7 +96,7 @@ export default function TrackingPage() {
         { label: "Impressions Bing/Yahoo", value: nf(t.bing_impressions) },
         { label: "Clics Bing/Yahoo", value: nf(t.bing_clicks) },
         { label: "Visites (Clarity)", value: data!.clarity_sites ? nf(t.sessions) : "—" },
-        { label: `Clics bouton humains (+${nf(t.go_bots)} robots exclus)`, value: nf(t.go_clicks) },
+        { label: `Clics bouton humains (+${nf(t.go_bots)} robots exclus)`, value: nf(t.go_clicks) + (data!.clarity_sites && t.sessions ? ` · ${((t.go_clicks / t.sessions) * 100).toFixed(1)} %` : "") },
         { label: "Ventes", value: nf(t.conversions) },
         { label: "Revenus", value: `${nf(Math.round(t.revenue_usd))} $` },
       ]
@@ -269,6 +269,7 @@ export default function TrackingPage() {
                     <TableHead className="w-20 text-right">Bing clics</TableHead>
                     <TableHead className="w-20 text-right">Visites</TableHead>
                     <TableHead className="w-28 text-right">Clics humains</TableHead>
+                    <TableHead className="w-20 text-right">% qui cliquent</TableHead>
                     <TableHead className="w-16 text-right">Ventes</TableHead>
                     <TableHead className="w-20 text-right">Revenus</TableHead>
                     <TableHead className="min-w-72">Constats</TableHead>
@@ -296,6 +297,10 @@ export default function TrackingPage() {
                             {r.go_invalid > 0 && `${nf(r.go_invalid)} refusés`}
                           </div>
                         )}
+                      </TableCell>
+                      {/* Part des visiteurs (Clarity) qui cliquent sur le lien d'affiliation (Leo 25/10/2026). */}
+                      <TableCell className="text-right">
+                        {r.sessions ? `${((r.go_clicks / r.sessions) * 100).toFixed(1)} %` : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="text-right font-medium">{r.conversions || ""}</TableCell>
                       <TableCell className="text-right font-medium">{r.revenue_usd ? `${nf(Math.round(r.revenue_usd))} $` : ""}</TableCell>
