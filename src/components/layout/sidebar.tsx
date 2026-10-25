@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Activity,
   Hourglass,
+  Lightbulb,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -28,6 +29,7 @@ const navigation = [
   { name: "Tracking EMD", href: "/tracking", icon: Activity },
   { name: "Tracking sites expirés", href: "/tracking-expired", icon: Activity },
   { name: "Domaines expirés", href: "/expires", icon: Hourglass },
+  { name: "Idées EMD", href: "/idees-emd", icon: Lightbulb },
   { name: "Sites", href: "/sites", icon: Globe },
   { name: "Search Console", href: "/gsc", icon: BarChart3 },
   { name: "Indexation", href: "/indexation", icon: FileSearch },
