@@ -45,6 +45,20 @@ interface Resp {
 }
 
 const nf = (n: number) => n.toLocaleString("fr-FR");
+
+type CleTri = "position" | "bing_impressions" | "bing_clicks" | "sessions" | "go_clicks" | "taux" | "conversions" | "revenue_usd";
+function EnteteTri({ cle, children, className, tri, onTri }: { cle: CleTri; children: React.ReactNode; className?: string; tri: { cle: CleTri; desc: boolean } | null; onTri: (c: CleTri) => void }) {
+  return (
+    <TableHead className={`${className ?? ""} cursor-pointer select-none hover:text-foreground`} onClick={() => onTri(cle)}>
+      {children}{tri?.cle === cle ? (tri.desc ? " ↓" : " ↑") : ""}
+    </TableHead>
+  );
+}
+function valeurTri(r: Row, cle: CleTri): number | null {
+  if (cle === "taux") return r.sessions ? r.go_clicks / r.sessions : null;
+  if (cle === "position") return r.position_checked && r.position !== null ? -r.position : null; // ↓ = meilleure position d'abord
+  return r[cle] ?? null;
+}
 const flag = (iso: string | null) =>
   iso && iso.length === 2 ? iso.toUpperCase().split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("") : "";
 
@@ -75,6 +89,9 @@ export default function TrackingPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "bad" | "good">("all");
+  // Tri par colonne (Leo 25/10/2026 : « classer par vrais clics humains »). Clic = décroissant, 2e clic = croissant.
+  const [tri, setTri] = useState<{ cle: CleTri; desc: boolean } | null>(null);
+  const trier = (cle: CleTri) => setTri((t) => (t && t.cle === cle ? { cle, desc: !t.desc } : { cle, desc: true }));
 
   useEffect(() => {
     fetch(`/api/tracking?days=${days}`, { cache: "no-store" })
@@ -85,10 +102,18 @@ export default function TrackingPage() {
 
   const rows = useMemo(() => {
     const all = data?.rows ?? [];
-    if (filter === "bad") return all.filter((r) => r.findings.some((f) => f.level === "bad" || f.level === "warn"));
-    if (filter === "good") return all.filter((r) => r.conversions > 0);
-    return all;
-  }, [data, filter]);
+    const filtres = filter === "bad" ? all.filter((r) => r.findings.some((f) => f.level === "bad" || f.level === "warn"))
+      : filter === "good" ? all.filter((r) => r.conversions > 0) : all;
+    if (!tri) return filtres;
+    // Valeur absente (pas de Clarity, pas de position) toujours en bas.
+    return [...filtres].sort((a, b) => {
+      const va = valeurTri(a, tri.cle), vb = valeurTri(b, tri.cle);
+      if (va === null && vb === null) return 0;
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      return tri.desc ? vb - va : va - vb;
+    });
+  }, [data, filter, tri]);
 
   const t = data?.totals;
   const steps = t
@@ -264,14 +289,14 @@ export default function TrackingPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>EMD</TableHead>
-                    <TableHead className="w-20">Google</TableHead>
-                    <TableHead className="w-24 text-right">Bing impr.</TableHead>
-                    <TableHead className="w-20 text-right">Bing clics</TableHead>
-                    <TableHead className="w-20 text-right">Visites</TableHead>
-                    <TableHead className="w-28 text-right">Clics humains</TableHead>
-                    <TableHead className="w-20 text-right">% qui cliquent</TableHead>
-                    <TableHead className="w-16 text-right">Ventes</TableHead>
-                    <TableHead className="w-20 text-right">Revenus</TableHead>
+                    <EnteteTri tri={tri} onTri={trier} cle="position" className="w-20">Google</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="bing_impressions" className="w-24 text-right">Bing impr.</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="bing_clicks" className="w-20 text-right">Bing clics</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="sessions" className="w-20 text-right">Visites</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="go_clicks" className="w-28 text-right">Clics humains</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="taux" className="w-20 text-right">% qui cliquent</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="conversions" className="w-16 text-right">Ventes</EnteteTri>
+                    <EnteteTri tri={tri} onTri={trier} cle="revenue_usd" className="w-20 text-right">Revenus</EnteteTri>
                     <TableHead className="min-w-72">Constats</TableHead>
                   </TableRow>
                 </TableHeader>
