@@ -76,6 +76,66 @@ function TrafficCurve({ series }: { series: { m: string; v: number }[] | null | 
   );
 }
 
+// Résultats des 7 derniers jours (Leo 27/10) : qui a eu chaque domaine coché, et quelles plateformes nous battent le plus.
+interface ResultRow { domain: string; list_date: string; platforms: string[]; status: string; note: string | null; winner: string | null }
+interface ResultsResp { rows: ResultRow[]; totals: { won: number; lost: number; pending: number }; winners: [string, number][] }
+function Results7d() {
+  const [res, setRes] = useState<ResultsResp | null>(null);
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    fetch("/api/expired/results", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then(setRes).catch(() => setRes(null));
+  }, []);
+  if (!res || res.rows.length === 0) return null;
+  const label: Record<string, { text: string; cls: string }> = {
+    won: { text: "à toi", cls: "text-emerald-600 dark:text-emerald-400 font-semibold" },
+    lost: { text: "perdu", cls: "text-red-600 dark:text-red-400" },
+    pending: { text: "en attente", cls: "text-amber-600 dark:text-amber-400" },
+  };
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
+        <CardTitle className="mr-auto text-base">Résultats des 7 derniers jours</CardTitle>
+        <span className="text-sm"><span className={label.won.cls}>{res.totals.won} à toi</span> · <span className={label.lost.cls}>{res.totals.lost} perdus</span> · <span className={label.pending.cls}>{res.totals.pending} en attente</span></span>
+        <button onClick={() => setOpen((o) => !o)} className="rounded-md border px-2.5 py-1 text-sm hover:bg-muted">{open ? "Masquer" : "Afficher"}</button>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4">
+          {res.winners.length > 0 && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">Qui nous a pris les domaines : </span>
+              {res.winners.map(([w, n], i) => <span key={w}>{i > 0 && " · "}<strong>{w}</strong> {n}</span>)}
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Domaine</TableHead>
+                  <TableHead>Liste du</TableHead>
+                  <TableHead>Nos plateformes</TableHead>
+                  <TableHead>Résultat</TableHead>
+                  <TableHead>Détail</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {res.rows.map((r) => (
+                  <TableRow key={r.domain}>
+                    <TableCell className="font-medium">{r.domain}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{new Date(r.list_date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })}</TableCell>
+                    <TableCell className="text-xs">{r.platforms.map((p) => PLATFORM[p] ?? p).join(", ")}</TableCell>
+                    <TableCell className={`text-xs ${label[r.status]?.cls ?? ""}`}>{label[r.status]?.text ?? r.status}{r.status === "lost" && r.winner ? ` — chez ${r.winner}` : ""}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.note ?? "pas encore vérifié (contrôle chaque heure, le lendemain de la fin)"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 export default function ExpiresPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [date, setDate] = useState<string>("");
@@ -181,6 +241,8 @@ export default function ExpiresPage() {
           </div>
         );
       })()}
+
+      <Results7d />
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
