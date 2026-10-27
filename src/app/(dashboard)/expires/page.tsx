@@ -236,7 +236,8 @@ export default function ExpiresPage() {
                         <div className="flex flex-wrap gap-1.5">
                           {shownSources(r).map((s) => {
                             const key = `${r.domain}|${s.platform}`;
-                            const st = s.robot_requested && s.robot_status ? STATUS[s.robot_status] : null;
+                            // Résultat du lendemain (gagné / parti chez un autre) affiché aussi pour les backorders posés à la main
+                            const st = s.robot_status === "won" || s.robot_status === "lost" ? STATUS[s.robot_status] : s.robot_requested && s.robot_status ? STATUS[s.robot_status] : null;
                             const ok = s.backorder_placed || s.robot_status === "done" || s.robot_status === "won";
                             return (
                               <div key={s.platform} className={`flex flex-col gap-0.5 rounded-md border px-2 py-1 text-xs ${ok ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950" : s.robot_requested ? "border-amber-500" : ""}`} title={[s.ends_at ? `Fin : ${s.ends_at}` : "", s.robot_note ?? ""].filter(Boolean).join("\n") || undefined}>
