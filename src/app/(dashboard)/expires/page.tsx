@@ -136,6 +136,92 @@ function Results7d() {
   );
 }
 
+// Vue Semaine (Leo 27/10) : liste du lundi DomainOrder / Realtime + toutes les apparitions du domaine dans la semaine.
+interface Appearance { list_date: string; platform: string; kind: string; price: string | null; ends_at_ts: string | null; backorder_placed: boolean; robot_requested: boolean; robot_status: string | null }
+interface WeekRow { domain: string; category?: string; traffic_current?: number | null; traffic_6m?: number | null; traffic_peak?: number | null; peak_month?: string | null; traffic_checked_at?: string | null; appearances: Appearance[] }
+function WeekView({ date }: { date: string }) {
+  const [res, setRes] = useState<{ monday: string; sunday: string; rows: WeekRow[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [cat, setCat] = useState<"all" | "medical" | "sport">("all");
+  const [withTraffic, setWithTraffic] = useState(true);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    setRes(null);
+    fetch(`/api/expired/week${date ? `?date=${date}` : ""}`, { cache: "no-store" })
+      .then(async (r) => { const j = await r.json(); if (!r.ok) throw new Error(j.error ?? r.status); setRes(j); })
+      .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+  }, [date]);
+  const rows = useMemo(() => (res?.rows ?? [])
+    .filter((r) => r.category !== "psy" && (cat === "all" || r.category === cat) && (!withTraffic || (r.traffic_peak ?? 0) > 0) && (!q || r.domain.includes(q.toLowerCase())))
+    .sort((a, b) => (b.traffic_current ?? 0) - (a.traffic_current ?? 0) || (b.traffic_peak ?? 0) - (a.traffic_peak ?? 0)), [res, cat, withTraffic, q]);
+  const fmt = (iso: string | null, day: string) => iso
+    ? new Date(iso).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : new Date(day + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" });
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
+        <CardTitle className="mr-auto text-base">
+          Semaine {res ? `du ${new Date(res.monday + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })} au ${new Date(res.sunday + "T12:00:00").toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}` : ""} — {rows.length} domaines (liste du lundi DomainOrder / Realtime)
+        </CardTitle>
+        <div className="flex gap-1">
+          {(["all", "medical", "sport"] as const).map((c) => (
+            <button key={c} onClick={() => setCat(c)} className={`rounded-md border px-2.5 py-1 text-sm ${cat === c ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>{c === "all" ? "Tous" : CAT[c]}</button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={withTraffic} onChange={(e) => setWithTraffic(e.target.checked)} /> Avec trafic</label>
+        <Input className="h-9 w-48" placeholder="Chercher…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </CardHeader>
+      <CardContent>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        {!res && !err && <p className="text-sm text-muted-foreground">Chargement…</p>}
+        {res && rows.length === 0 && <p className="text-sm text-muted-foreground">Aucune liste du lundi pour cette semaine.</p>}
+        {rows.length > 0 && (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Domaine</TableHead>
+                  <TableHead className="text-right">Actuel</TableHead>
+                  <TableHead className="text-right">Il y a 6 mois</TableHead>
+                  <TableHead className="text-right">Pic</TableHead>
+                  <TableHead>Où et quand dans la semaine (heure de Paris)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((r) => (
+                  <TableRow key={r.domain}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <a href={`https://web.archive.org/web/2024*/${r.domain}`} target="_blank" rel="noreferrer" className="font-medium hover:underline">{r.domain}</a>
+                        <Badge variant="outline" className="text-[10px]">{CAT[r.category ?? ""] ?? r.category}</Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{r.traffic_checked_at ? nf(r.traffic_current) : <span className="text-xs text-muted-foreground">à relever</span>}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.traffic_checked_at ? nf(r.traffic_6m) : ""}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.traffic_checked_at ? <>{nf(r.traffic_peak)} <span className="text-xs text-muted-foreground">{monthFr(r.peak_month)}</span></> : ""}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1.5">
+                        {r.appearances.map((a, i) => {
+                          const ok = a.backorder_placed || a.robot_status === "done" || a.robot_status === "won";
+                          return (
+                            <span key={i} className={`rounded-md border px-2 py-0.5 text-xs ${ok ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950" : a.robot_requested ? "border-amber-500" : ""}`} title={a.price ?? undefined}>
+                              <strong>{PLATFORM[a.platform] ?? a.platform}</strong> · {fmt(a.ends_at_ts, a.list_date)}{a.kind === "auction" ? " · enchère" : ""}{ok ? " · posé" : ""}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ExpiresPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [date, setDate] = useState<string>("");
@@ -149,6 +235,7 @@ export default function ExpiresPage() {
   const [withTraffic, setWithTraffic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const [view, setView] = useState<"day" | "week">("day");
 
   const load = useCallback((d?: string) => {
     fetch(`/api/expired${d ? `?date=${d}` : ""}`, { cache: "no-store" })
@@ -244,7 +331,15 @@ export default function ExpiresPage() {
 
       <Results7d />
 
-      <Card>
+      <div className="flex gap-1">
+        {(["day", "week"] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)} className={`rounded-md border px-3 py-1.5 text-sm ${view === v ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>{v === "day" ? "Liste du jour" : "Semaine (DomainOrder / Realtime)"}</button>
+        ))}
+      </div>
+
+      {view === "week" && <WeekView date={date} />}
+
+      {view === "day" && <Card>
         <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
           <CardTitle className="mr-auto text-base">{rows.length} domaines</CardTitle>
           <select className="h-9 rounded-md border bg-background px-2 text-sm" value={date} onChange={(e) => { setDate(e.target.value); load(e.target.value); }} aria-label="Jour de la liste">
@@ -356,7 +451,7 @@ export default function ExpiresPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   );
 }
