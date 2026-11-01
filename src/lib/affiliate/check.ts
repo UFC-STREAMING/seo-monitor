@@ -444,6 +444,34 @@ export async function checkAffiliateLink(
   return { ...found, verdict: "ok", detail: `Approuvé chez ${offer.network}, sub1 correct` };
 }
 
+/**
+ * Offres qui refusent tout depuis 7 j, par site. Le contrôle sur 30 j garde « ok » tant qu'il
+ * reste un vieux clic valide : lipolyx.fr affichait ok avec 22 clics « offer inactive » en 7 j.
+ */
+async function loadDeadOffers(supabase: SupabaseClient<Database>): Promise<Map<string, number>> {
+  const since = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10);
+  const totals = new Map<string, { inactive: number; accepted: number }>();
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error } = await supabase
+      .from("tracking_daily")
+      .select("site_id, extra")
+      .eq("source", "everflow")
+      .gte("date", since)
+      .order("id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`tracking_daily: ${error.message}`);
+    for (const d of page ?? []) {
+      const extra = d.extra as { inactive?: number; accepted?: number } | null;
+      const t = totals.get(d.site_id) ?? { inactive: 0, accepted: 0 };
+      t.inactive += extra?.inactive ?? 0;
+      t.accepted += extra?.accepted ?? 0;
+      totals.set(d.site_id, t);
+    }
+    if (!page || page.length < 1000) break;
+  }
+  return new Map([...totals].filter(([, t]) => t.inactive > 0 && t.accepted === 0).map(([id, t]) => [id, t.inactive]));
+}
+
 /** Vérifie tous les EMD actifs et enregistre le résultat sur `sites`. */
 export async function runAffiliateChecks(
   supabase: SupabaseClient<Database>
@@ -462,6 +490,7 @@ export async function runAffiliateChecks(
   const clicks = await loadClickStats();
   const { data: own } = await supabase.from("sites").select("domain").in("category", ["shop", "other"]);
   const ownHosts = new Set((own ?? []).map((o) => o.domain.replace(/^www\./, "")));
+  const deadOffers = await loadDeadOffers(supabase);
   const results: AffiliateCheck[] = [];
   const list = sites ?? [];
   for (let i = 0; i < list.length; i += 8) {
@@ -471,6 +500,11 @@ export async function runAffiliateChecks(
     );
     for (let j = 0; j < batch.length; j++) {
       const c = checks[j];
+      const dead = deadOffers.get(batch[j].id);
+      if (dead && c.verdict !== "ko") {
+        c.verdict = "ko";
+        c.detail = `Offre inactive : ${dead} clics refusés sur 7 j, 0 accepté`;
+      }
       results.push(c);
 
       // Lien KO, ou bouton vers le site officiel (0 commission) → offre approuvée de la marque ?

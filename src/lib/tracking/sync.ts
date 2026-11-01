@@ -68,12 +68,12 @@ export async function syncBing(supabase: Supa, days = 30): Promise<{ sites: numb
 export async function syncEverflow(supabase: Supa, days = 3): Promise<{ rows: number; errors: string[] }> {
   const sites = await emdSites(supabase);
   const byKey = new Map(sites.map((s) => [normalizeDomainKey(s.domain), s.id]));
-  type Agg = { site_id: string; date: string; go_clicks: number; go_invalid: number; conversions: number; revenue_usd: number; extra: { bots: number; own: number } };
+  type Agg = { site_id: string; date: string; go_clicks: number; go_invalid: number; conversions: number; revenue_usd: number; extra: { bots: number; own: number; inactive: number; accepted: number } };
   const agg = new Map<string, Agg>();
   const get = (siteId: string, date: string) => {
     const k = `${siteId}|${date}`;
     let a = agg.get(k);
-    if (!a) { a = { site_id: siteId, date, go_clicks: 0, go_invalid: 0, conversions: 0, revenue_usd: 0, extra: { bots: 0, own: 0 } }; agg.set(k, a); }
+    if (!a) { a = { site_id: siteId, date, go_clicks: 0, go_invalid: 0, conversions: 0, revenue_usd: 0, extra: { bots: 0, own: 0, inactive: 0, accepted: 0 } }; agg.set(k, a); }
     return a;
   };
   const errors: string[] = [];
@@ -88,6 +88,9 @@ export async function syncEverflow(supabase: Supa, days = 3): Promise<{ rows: nu
         if (!siteId) continue;
         const a = get(siteId, date);
         const kind = classifyClick(c);
+        // Tous clics confondus : même un robot prouve que l'offre accepte ou refuse le lien
+        if ((c.error_code ?? 0) === 0) a.extra.accepted++;
+        else if ((c.error_message ?? "").startsWith("The offer is inactive")) a.extra.inactive++;
         if (kind === "human") a.go_clicks++;
         else if (kind === "rejected") a.go_invalid++;
         else if (kind === "bot") a.extra.bots++;

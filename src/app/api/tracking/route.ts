@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findingsFor, severity, type FunnelRow } from "@/lib/tracking/funnel";
+import { findingsFor, severity, splitSpikes, type FunnelRow } from "@/lib/tracking/funnel";
 import { analyze } from "@/lib/tracking/analysis";
 import { clickSplit, compareFeatures } from "@/lib/tracking/insights";
 import type { PageFeatures } from "@/lib/tracking/page-features";
@@ -62,6 +62,7 @@ export async function GET(request: NextRequest) {
       mine.filter((d) => d.source === src).reduce((a, d) => a + Number(d[k] ?? 0), 0);
     const clarity = mine.filter((d) => d.source === "clarity");
     const kw = kwBySite.get(s.id);
+    const visits = splitSpikes(clarity.map((d) => Number(d.sessions ?? 0)));
     const base = {
       site_id: s.id,
       domain: s.domain,
@@ -74,7 +75,8 @@ export async function GET(request: NextRequest) {
       affiliate_detail: s.affiliate_detail ?? null,
       bing_impressions: sum("bing", "impressions"),
       bing_clicks: sum("bing", "clicks"),
-      sessions: clarity.length ? sum("clarity", "sessions") : null,
+      sessions: clarity.length ? visits.kept : null,
+      sessions_ignored: visits.ignored,
       scroll_depth: clarity.length
         ? clarity.reduce((a, d) => a + Number(d.scroll_depth ?? 0), 0) / clarity.length
         : null,

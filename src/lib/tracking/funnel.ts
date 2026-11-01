@@ -15,6 +15,7 @@ export interface FunnelRow {
   bing_impressions: number;
   bing_clicks: number;
   sessions: number | null; // null = Clarity pas installé
+  sessions_ignored: number; // visites des jours de pic, retirées de sessions
   scroll_depth: number | null;
   rage_clicks: number | null;
   go_clicks: number;
@@ -30,6 +31,20 @@ export interface Finding {
   text: string;
 }
 
+/**
+ * Pic isolé (test, robot non détecté par Clarity) : il fausserait les taux de tout le site.
+ * Jour écarté s'il dépasse 3× la médiane du site et 50 visites (alpharise.fr : 207 un 21/10, ~15 sinon).
+ */
+export function splitSpikes(daily: number[]): { kept: number; ignored: number } {
+  const active = daily.filter((n) => n > 0).sort((a, b) => a - b);
+  if (active.length < 5) return { kept: daily.reduce((a, n) => a + n, 0), ignored: 0 };
+  const limit = Math.max(50, active[Math.floor(active.length / 2)] * 3);
+  return daily.reduce(
+    (t, n) => (n > limit ? { ...t, ignored: t.ignored + n } : { ...t, kept: t.kept + n }),
+    { kept: 0, ignored: 0 }
+  );
+}
+
 export function findingsFor(r: Omit<FunnelRow, "findings">): Finding[] {
   const f: Finding[] = [];
   if (r.affiliate_status === "ko") f.push({ level: "bad", text: `Lien affilié KO : ${r.affiliate_detail ?? "à vérifier"}` });
@@ -40,6 +55,8 @@ export function findingsFor(r: Omit<FunnelRow, "findings">): Finding[] {
 
   if (r.bing_impressions >= 50 && r.bing_clicks === 0)
     f.push({ level: "warn", text: `Vu ${r.bing_impressions} fois sur Bing, 0 clic : revoir le titre et la description` });
+
+  if (r.sessions_ignored > 0) f.push({ level: "info", text: `${r.sessions_ignored} visites de jours de pic ignorées` });
 
   if (r.sessions !== null && r.sessions >= 30) {
     const ctr = r.go_clicks / r.sessions;

@@ -12,10 +12,13 @@ const OWN_COUNTRIES = new Set(["BG", "TH"]);
 // Opérateurs = hébergeurs, clouds, moteurs : pas des internautes
 const DATACENTER =
   /amazon|aws|google|microsoft|azure|ovh|hetzner|digitalocean|linode|akamai|cloudflare|oracle|alibaba|tencent|contabo|leaseweb|choopa|vultr|m247|datacamp|zscaler|seznam|yandex|baidu|bytedance|scaleway|online s\.a\.s|hostinger|ionos|godaddy|colocrossing|psychz|fastly|facebook|meta platforms|apple inc/i;
+// Audit 01/11/2026 : FAI grand public en façade, 0 clic réel sur les boutons (cta_clicks) et 0 vente sur 60 j
+const PROXY_ISP = /aviation re|aviationai|flux telecom|netcup|rolandas uscila|nacionalinis telekomunikaciju|lithuanian radio/i;
 
 export interface RawClick {
   sub1?: string;
   error_code?: number;
+  error_message?: string;
   relationship?: {
     geolocation?: { country_code?: string; isp_name?: string; organization?: string; is_proxy?: boolean };
     device_information?: { platform_name?: string; browser_name?: string; is_robot?: boolean; is_filter?: boolean };
@@ -31,7 +34,8 @@ export function classifyClick(c: RawClick): ClickKind {
   if (OWN_COUNTRIES.has((g.country_code ?? "").toUpperCase())) return "own";
   if (d.is_robot || d.is_filter || g.is_proxy) return "bot";
   if (!d.browser_name || !d.platform_name || d.platform_name === "Unknown") return "bot";
-  if (DATACENTER.test(`${g.isp_name ?? ""} ${g.organization ?? ""}`)) return "bot";
+  const isp = `${g.isp_name ?? ""} ${g.organization ?? ""}`;
+  if (DATACENTER.test(isp) || PROXY_ISP.test(isp)) return "bot";
   // Clic d'un humain mais refusé par Everflow (pays hors offre, doublon…)
   if ((c.error_code ?? 0) !== 0) return "rejected";
   return "human";
