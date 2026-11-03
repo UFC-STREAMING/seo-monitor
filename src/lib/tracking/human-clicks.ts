@@ -13,10 +13,15 @@ const OWN_COUNTRIES = new Set(["BG", "TH"]);
 const DATACENTER =
   /amazon|aws|google|microsoft|azure|ovh|hetzner|digitalocean|linode|akamai|cloudflare|oracle|alibaba|tencent|contabo|leaseweb|choopa|vultr|m247|datacamp|zscaler|seznam|yandex|baidu|bytedance|scaleway|online s\.a\.s|hostinger|ionos|godaddy|colocrossing|psychz|fastly|facebook|meta platforms|apple inc/i;
 // Audit 01/11/2026 : FAI grand public en façade, 0 clic réel sur les boutons (cta_clicks) et 0 vente sur 60 j
-const PROXY_ISP = /aviation re|aviationai|flux telecom|netcup|rolandas uscila|nacionalinis telekomunikaciju|lithuanian radio/i;
+// Audit 03/11/2026 : Babbar = robot SEO (Barkrowler)
+const PROXY_ISP = /aviation re|aviationai|flux telecom|netcup|rolandas uscila|nacionalinis telekomunikaciju|lithuanian radio|babbar/i;
+// Audit 03/11/2026 : 83.99.206.x (Balticom / SIA Geedo, LV), Chrome macOS sans referer, 24 h/24 :
+// ~11 000 clics en 30 j sur 139 offres depuis le 09/10. FAI grand public en façade, donc pas dans PROXY_ISP.
+const BOT_IP_PREFIXES = ["83.99.206."];
 
 export interface RawClick {
   sub1?: string;
+  user_ip?: string;
   error_code?: number;
   error_message?: string;
   relationship?: {
@@ -36,6 +41,7 @@ export function classifyClick(c: RawClick): ClickKind {
   if (!d.browser_name || !d.platform_name || d.platform_name === "Unknown") return "bot";
   const isp = `${g.isp_name ?? ""} ${g.organization ?? ""}`;
   if (DATACENTER.test(isp) || PROXY_ISP.test(isp)) return "bot";
+  if (BOT_IP_PREFIXES.some((p) => (c.user_ip ?? "").startsWith(p))) return "bot";
   // Clic d'un humain mais refusé par Everflow (pays hors offre, doublon…)
   if ((c.error_code ?? 0) !== 0) return "rejected";
   return "human";
