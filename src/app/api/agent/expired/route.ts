@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
   if (request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const started = Date.now();
   let body: { date?: string; domains?: InDomain[]; fetch_traffic?: boolean };
   try {
     body = await request.json();
@@ -102,7 +103,8 @@ export async function POST(request: NextRequest) {
   if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
 
   // Trafic : seulement les domaines jamais relevés ou relevés il y a plus de 7 jours
-  let traffic: { checked: number; cost_usd: number; error?: string } = { checked: 0, cost_usd: 0 };
+  // `remaining` > 0 → renvoyer la même liste : seuls les domaines encore non relevés repartent (push_expired_seo_monitor.py le fait).
+  let traffic: { checked: number; cost_usd: number; remaining: number; error?: string } = { checked: 0, cost_usd: 0, remaining: 0 };
   if (body.fetch_traffic !== false) {
     const todo = names.filter((n) => {
       if (given.has(n)) return false;
@@ -111,22 +113,34 @@ export async function POST(request: NextRequest) {
     });
     if (todo.length) {
       try {
-        const { results, costUsd } = await fetchTraffic(todo);
-        // Écriture groupée : 1 000 updates un par un dépassaient la limite Vercel de 300 s
-        const updates = results.map((t) => ({
-          domain: t.domain, traffic_current: t.current, traffic_6m: t.six_months, traffic_peak: t.peak,
-          peak_month: t.peak_month, traffic_series: t.series, traffic_checked_at: now,
-        }));
-        for (let i = 0; i < updates.length; i += 500) {
-          const { error } = await supabase.from("expired_domains").upsert(updates.slice(i, i + 500), { onConflict: "domain" });
-          if (error) throw new Error(`Supabase ${error.message}`);
-        }
-        traffic = { checked: results.length, cost_usd: costUsd };
+        // chaque lot est écrit dès réception : un lot en panne ou la limite Vercel ne font plus tout perdre
+        const { results, costUsd, remaining, error } = await fetchTraffic(todo, {
+          deadlineMs: started + 150_000, // dernier appel (75 s max) fini avant les 300 s Vercel
+          onBatch: async (batch) => {
+            const updates = batch.map((t) => ({
+              domain: t.domain, traffic_current: t.current, traffic_6m: t.six_months, traffic_peak: t.peak,
+              peak_month: t.peak_month, traffic_series: t.series, traffic_checked_at: now,
+            }));
+            const { error } = await supabase.from("expired_domains").upsert(updates, { onConflict: "domain" });
+            if (error) throw new Error(`Supabase ${error.message}`);
+          },
+        });
+        traffic = { checked: results.length, cost_usd: costUsd, remaining, ...(error ? { error } : {}) };
       } catch (e) {
-        traffic = { checked: 0, cost_usd: 0, error: e instanceof Error ? e.message : String(e) };
+        traffic = { checked: 0, cost_usd: 0, remaining: todo.length, error: e instanceof Error ? e.message : String(e) };
       }
     }
   }
 
-  return NextResponse.json({ ok: true, date, domains: rows.length, listings: uniq.length, traffic });
+  // Domaines du jour qui ont encore du trafic, du plus gros au plus petit : Dana les envoie à Leo sur Telegram (Leo 26/10)
+  const withTraffic: { domain: string; category: string; label: string | null; traffic_current: number | null; traffic_peak: number | null }[] = [];
+  for (let i = 0; i < names.length; i += 500) {
+    const { data } = await supabase.from("expired_domains")
+      .select("domain, category, label, traffic_current, traffic_peak")
+      .in("domain", names.slice(i, i + 500)).gt("traffic_current", 0);
+    withTraffic.push(...(data ?? []));
+  }
+  withTraffic.sort((a, b) => (b.traffic_current ?? 0) - (a.traffic_current ?? 0));
+
+  return NextResponse.json({ ok: true, date, domains: rows.length, listings: uniq.length, traffic, with_traffic: withTraffic });
 }

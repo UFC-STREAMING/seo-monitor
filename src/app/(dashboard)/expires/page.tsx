@@ -324,7 +324,7 @@ export default function ExpiresPage() {
         const unchecked = (data?.rows ?? []).filter((r) => !r.traffic_checked_at).length;
         return unchecked > 0 && (
           <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-            <strong>Trafic non relevé pour {unchecked} domaine{unchecked > 1 ? "s" : ""}</strong> sur {data?.rows.length}. Le relevé DataForSEO (via treg) a échoué : clé treg ou solde à vérifier.
+            <strong>Trafic non relevé pour {unchecked} domaine{unchecked > 1 ? "s" : ""}</strong> sur {data?.rows.length}. Le relevé DataForSEO (via treg) n&apos;a pas abouti pour eux (erreur treg, clé ou solde) : le message du matin de Dana donne l&apos;erreur exacte.
           </div>
         );
       })()}
