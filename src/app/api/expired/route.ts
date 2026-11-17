@@ -48,9 +48,9 @@ export async function GET(request: NextRequest) {
 //   { action: "placed", placed }            → note « backorder posé à la main » (crée la ligne si la plateforme n'était pas listée)
 //   { action: "robot", robot, max_bid? }    → ordre au robot du Mini (Catched : poser le backorder ; Nicsell : miser max_bid 5 min avant la fin)
 //   { action: "regfree", watch }            → plateforme « regfree » : le sniper du Mini achète chez Openprovider dès que le domaine est libre
-const ROBOT_PLATFORMS = new Set(["catched", "nicsell", "dynadot"]);
+const ROBOT_PLATFORMS = new Set(["catched", "nicsell", "dynadot", "dropcatch"]);
 // Plateformes qu'on peut cocher même si Dana ne les a pas listées (Leo 24/10 : un .fr est sur Catched, Nicsell ET WebExpire)
-const EXTRA_PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "regfree"]);
+const EXTRA_PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "regfree", "dropcatch"]);
 
 export async function POST(request: NextRequest) {
   if (!(await requireUser())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     const watch = !!body.watch;
     update = { robot_requested: watch, robot_status: watch ? "pending" : "cancelled", robot_note: watch ? "surveillé chaque minute, achat Openprovider dès qu'il est libre" : "annulé par Leo", robot_at: new Date().toISOString() };
   } else if (body.action === "robot") {
-    if (!ROBOT_PLATFORMS.has(body.platform)) return NextResponse.json({ error: "Robot disponible seulement sur Catched, Nicsell et Dynadot" }, { status: 400 });
+    if (!ROBOT_PLATFORMS.has(body.platform)) return NextResponse.json({ error: "Robot disponible seulement sur Catched, Nicsell, Dynadot et DropCatch" }, { status: 400 });
     const robot = !!body.robot;
     const maxBid = body.max_bid == null ? null : Number(body.max_bid);
     if (robot && body.platform === "nicsell" && !(maxBid && maxBid >= 10)) return NextResponse.json({ error: "Prix max Nicsell requis (10 € minimum)" }, { status: 400 });

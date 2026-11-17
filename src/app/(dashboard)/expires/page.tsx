@@ -21,13 +21,15 @@ interface Resp { dates: string[]; date: string | null; rows: Row[] }
 
 const nf = (n: number | null | undefined) => (n == null ? "—" : Math.round(n).toLocaleString("fr-FR"));
 const CAT: Record<string, string> = { medical: "Médical", sport: "Sport", psy: "Psy" };
-const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime" };
+const PLATFORM: Record<string, string> = { catched: "Catched", nicsell: "Nicsell", webexpire: "WebExpire", bloomup: "Bloomup", dynadot: "Dynadot", domainorder: "DomainOrder", realtime: "Realtime", dropcatch: "DropCatch" };
 const monthFr = (m: string | null | undefined) => (m ? `${m.slice(5, 7)}/${m.slice(0, 4)}` : "");
-const ROBOT = new Set(["catched", "nicsell", "dynadot"]);
+const ROBOT = new Set(["catched", "nicsell", "dynadot", "dropcatch"]);
 // Prix max à saisir : Nicsell (€) et enchères Dynadot ($)
 const needsMax = (s: { platform: string; kind: string }) => s.platform === "nicsell" || (s.platform === "dynadot" && s.kind === "auction");
-// Plateformes cochables même si Dana ne les a pas listées (Leo 24/10) : Catched + Nicsell partout, WebExpire + Bloomup pour les .fr
-const extraPlatforms = (domain: string) => ["catched", "nicsell", ...(domain.endsWith(".fr") ? ["webexpire", "bloomup"] : [])];
+// Plateformes cochables même si Dana ne les a pas listées (Leo 24/10) : Catched + Nicsell partout, WebExpire + Bloomup pour les .fr,
+// DropCatch pour les extensions génériques (.com, .net, .org… + .cc/.tv), seules prises par DropCatch (Leo 17/11)
+const dropcatchTld = (domain: string) => { const t = domain.slice(domain.lastIndexOf(".") + 1); return t.length > 2 || t === "cc" || t === "tv"; };
+const extraPlatforms = (domain: string) => ["catched", "nicsell", ...(domain.endsWith(".fr") ? ["webexpire", "bloomup"] : []), ...(dropcatchTld(domain) ? ["dropcatch"] : [])];
 const blankSource = (platform: string): Source => ({ platform, kind: "extra", price: null, ends_at: null, ends_at_ts: null, backorder_placed: false, robot_requested: false, max_bid: null, robot_status: null, robot_note: null });
 // Sources affichées : celles listées par Dana + les plateformes compatibles non listées (cochage manuel seulement)
 const shownSources = (r: Row) => {
@@ -303,6 +305,7 @@ export default function ExpiresPage() {
       toast.success(!robot ? "Robot annulé"
         : s.platform === "nicsell" ? `Robot : mise de ${maxBid} € max sur ${domain} 5 min avant la fin`
         : s.platform === "dynadot" ? (s.kind === "auction" ? `Robot : mise de ${maxBid} $ max sur ${domain} 5 min avant la fin` : `Robot : backorder Dynadot sur ${domain}`)
+        : s.platform === "dropcatch" ? `Robot : backorder DropCatch sur ${domain} (payé seulement s’il est attrapé)`
         : `Catched : rappel Telegram 1 h avant la fin pour ${domain}`);
   }
 
@@ -402,7 +405,7 @@ export default function ExpiresPage() {
                                   <span className="font-medium">{PLATFORM[s.platform] ?? s.platform}</span>
                                   <span className="text-muted-foreground">{!s.listed ? "non listé" : s.kind === "auction" ? "enchère" : "backorder"}{s.price ? ` · ${s.price}` : ""}</span>
                                 </div>
-                                {ROBOT.has(s.platform) && s.listed ? (
+                                {ROBOT.has(s.platform) && (s.listed || s.platform === "dropcatch") ? (
                                   <div className="flex items-center gap-1">
                                     {needsMax(s) && (
                                       <input type="number" min={s.platform === "nicsell" ? 10 : 1} step={1} placeholder={s.platform === "nicsell" ? "max €" : "max $"} aria-label={`Prix max ${PLATFORM[s.platform]} pour ${r.domain}`}

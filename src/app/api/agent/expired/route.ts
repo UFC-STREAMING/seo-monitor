@@ -20,7 +20,7 @@ export const maxDuration = 300;
 //   "fetch_traffic": true                       // défaut true : relève le trafic des domaines jamais relevés ou relevés il y a > 7 jours
 // }
 // Idempotent : renvoyer la même liste met à jour prix / fins sans toucher aux cases « backorder posé ».
-const PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "dynadot", "domainorder", "realtime"]);
+const PLATFORMS = new Set(["catched", "nicsell", "webexpire", "bloomup", "dynadot", "domainorder", "realtime", "dropcatch"]);
 const CATEGORIES = new Set(["medical", "psy", "sport"]);
 const STALE_MS = 7 * 24 * 3600 * 1000;
 
