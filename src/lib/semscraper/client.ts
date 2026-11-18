@@ -89,6 +89,8 @@ async function parseLoose<T>(res: Response): Promise<T> {
   return JSON.parse(text.replace(/[\u0000-\u001f]/g, " ")) as T;
 }
 
+const MIN_ORGANIC_FOR_ABSENT = 30;
+
 function extract(row: SemRow, target: string): SerpCheckResult {
   const blocks = row.results ?? [];
   const serpFeatures = [...new Set(blocks.map((b) => b.type))].filter((t) => t !== "organic");
@@ -99,6 +101,22 @@ function extract(row: SemRow, target: string): SerpCheckResult {
     if (match) break;
   }
   const position = match?.rank_type ?? null;
+  // 17-18/11 : Semscraper renvoyait des jobs « done » quasi vides (0 à 8 résultats
+  // au lieu de ~70-100 à depth=10) → 47 EMD notés « hors top 100 » alors qu'ils
+  // étaient 1ers (optifuel, ondrela, velawarm…). SERP trop courte + site absent =
+  // erreur (rien n'est écrit) au lieu d'une fausse chute.
+  const organicCount = blocks
+    .filter((b) => b.type === "organic")
+    .reduce((n, b) => n + (b.items?.length ?? 0), 0);
+  if (!match && organicCount < MIN_ORGANIC_FOR_ABSENT) {
+    return {
+      position: null,
+      urlFound: null,
+      serpFeatures,
+      cost: row.cost ?? 0,
+      error: `SERP incomplète (${organicCount} résultats organiques)`,
+    };
+  }
   return {
     position: position !== null && position <= 100 ? position : null,
     urlFound: match?.url ?? null,

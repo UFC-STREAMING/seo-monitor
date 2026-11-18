@@ -139,7 +139,12 @@ export async function runPositionChecks(
   // 2e une heure après). On refait la recherche avant d'enregistrer la chute.
   const lost = toCheck
     .map((k, i) => i)
-    .filter((i) => !checks[i].error && checks[i].position === null && previousBySite.get(toCheck[i].keyword_id) != null);
+    .filter(
+      (i) =>
+        // SERP incomplète (Semscraper 17/11) : on retente aussi, sinon le mot-clé n'a aucun relevé du jour.
+        (checks[i].error?.startsWith("SERP incomplète") ||
+          (!checks[i].error && checks[i].position === null && previousBySite.get(toCheck[i].keyword_id) != null))
+    );
   const remainingMs = budget + 70_000 - (Date.now() - startedAt);
   if (lost.length && !balanceError && remainingMs > 60_000) {
     try {
