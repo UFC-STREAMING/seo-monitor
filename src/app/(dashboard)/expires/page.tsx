@@ -78,6 +78,91 @@ function TrafficCurve({ series }: { series: { m: string; v: number }[] | null | 
   );
 }
 
+// Mes enchères DropCatch (Leo 22/11/2026) : fin, plus haute mise, ton max, état, et nouvelle mise (posée par le robot sous 2 min).
+interface AuctionRow { id: number; domain: string; price: string | null; max_bid: number | null; ends_at_ts: string | null; robot_status: string; robot_note: string | null }
+function untilFr(iso: string | null, now: number) {
+  if (!iso) return "";
+  const ms = new Date(iso).getTime() - now;
+  if (ms <= 0) return "terminée";
+  const h = Math.floor(ms / 3600000), j = Math.floor(h / 24);
+  return j > 0 ? `dans ${j} j ${h % 24} h` : h > 0 ? `dans ${h} h ${Math.floor((ms % 3600000) / 60000)} min` : `dans ${Math.floor(ms / 60000)} min`;
+}
+function AuctionsDropCatch() {
+  const [rows, setRows] = useState<AuctionRow[] | null>(null);
+  const [bids, setBids] = useState<Record<number, string>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const load = useCallback(() => {
+    fetch("/api/expired/auctions", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j) => setRows(j?.auctions ?? [])).catch(() => setRows([]));
+  }, []);
+  useEffect(() => {
+    load();
+    const t = setInterval(() => { setNow(Date.now()); load(); }, 60000);
+    return () => clearInterval(t);
+  }, [load]);
+  if (!rows || rows.length === 0) return null;
+  async function bid(r: AuctionRow) {
+    const v = Number((bids[r.id] ?? "").replace(",", "."));
+    if (!(v > 0)) return toast.error("Mets une mise max en $");
+    const res = await fetch("/api/expired/auctions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, max_bid: v }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) return toast.error(j.error ?? "Erreur");
+    toast.success(`Mise de ${v} $ max sur ${r.domain} : le robot la pose sous 2 min`);
+    setBids((b) => ({ ...b, [r.id]: "" }));
+    load();
+  }
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center gap-3 space-y-0">
+        <CardTitle className="mr-auto text-base">Mes enchères DropCatch</CardTitle>
+        <span className="text-xs text-muted-foreground">mis à jour toutes les 2 min</span>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Domaine</TableHead>
+                <TableHead>Fin (Paris)</TableHead>
+                <TableHead>Plus haute</TableHead>
+                <TableHead>Ton max</TableHead>
+                <TableHead>État</TableHead>
+                <TableHead>Nouvelle mise max</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => {
+                const lead = (r.robot_note ?? "").includes("TU MÈNES");
+                return (
+                  <TableRow key={r.id}>
+                    <TableCell className="font-medium">{r.domain}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">
+                      {r.ends_at_ts ? new Date(r.ends_at_ts).toLocaleString("fr-FR", { timeZone: "Europe/Paris", weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"}
+                      <div className="text-muted-foreground">{untilFr(r.ends_at_ts, now)}</div>
+                    </TableCell>
+                    <TableCell className="text-sm font-semibold">{r.price ?? "—"}</TableCell>
+                    <TableCell className="text-sm">{r.max_bid != null ? `${r.max_bid} $` : "—"}</TableCell>
+                    <TableCell className={`text-xs ${r.robot_status === "bid" ? "text-amber-600 dark:text-amber-400" : lead ? "font-semibold text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                      {r.robot_note ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Input inputMode="decimal" placeholder="$" className="h-8 w-20" value={bids[r.id] ?? ""}
+                          onChange={(e) => setBids((b) => ({ ...b, [r.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === "Enter") bid(r); }} />
+                        <button onClick={() => bid(r)} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90">Miser</button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // Résultats des 7 derniers jours (Leo 27/10) : qui a eu chaque domaine coché, et quelles plateformes nous battent le plus.
 interface ResultRow { domain: string; list_date: string; platforms: string[]; status: string; note: string | null; winner: string | null }
 interface ResultsResp { rows: ResultRow[]; totals: { won: number; lost: number; pending: number }; winners: [string, number][] }
@@ -332,6 +417,7 @@ export default function ExpiresPage() {
         );
       })()}
 
+      <AuctionsDropCatch />
       <Results7d />
 
       <div className="flex gap-1">

@@ -13,13 +13,14 @@ export async function GET(request: NextRequest) {
   const { data, error } = await createAdminClient().from("expired_listings")
     .select("id, list_date, domain, platform, kind, price, max_bid, ends_at, ends_at_ts, robot_status, robot_note")
     .eq("robot_requested", true)
-    .or("robot_status.is.null,robot_status.eq.pending,robot_status.eq.done")
+    .or("robot_status.is.null,robot_status.eq.pending,robot_status.eq.done,robot_status.eq.bid")
     .order("ends_at_ts", { ascending: true, nullsFirst: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ orders: data ?? [] });
 }
 
-const STATUSES = new Set(["pending", "done", "failed", "won", "lost"]);
+// « auction » = enchère DropCatch en cours (Leo 22/11) : ni gagnée ni perdue, le robot ne repose pas de backorder
+const STATUSES = new Set(["pending", "done", "failed", "won", "lost", "auction"]);
 
 export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
