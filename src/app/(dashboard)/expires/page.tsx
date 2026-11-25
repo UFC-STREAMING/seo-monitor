@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { chooseRegistrar, REGISTRAR_LABEL } from "@/lib/expired/registrar-prices";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +41,7 @@ const shownSources = (r: Row) => {
 };
 const REGFREE: Record<string, { text: string; cls: string }> = {
   pending: { text: "surveillé chaque minute", cls: "text-amber-600 dark:text-amber-400" },
-  done: { text: "ACHETÉ (Openprovider)", cls: "font-semibold text-emerald-600 dark:text-emerald-400" },
+  done: { text: "ACHETÉ", cls: "font-semibold text-emerald-600 dark:text-emerald-400" },
   failed: { text: "échec achat", cls: "text-red-600 dark:text-red-400" },
 };
 const STATUS: Record<string, { text: string; cls: string }> = {
@@ -399,7 +400,7 @@ export default function ExpiresPage() {
   async function toggleRegfree(domain: string, s: Source | undefined) {
     const watch = !s?.robot_requested;
     patch(domain, "regfree", { robot_requested: watch, robot_status: watch ? "pending" : "cancelled", robot_note: null });
-    if (await send({ action: "regfree", domain, platform: "regfree", watch })) toast.success(watch ? `Regfree : ${domain} acheté chez Openprovider dès qu’il est libre` : "Surveillance regfree annulée");
+    if (await send({ action: "regfree", domain, platform: "regfree", watch })) toast.success(watch ? `Regfree : ${domain} acheté chez ${(c => c ? `${REGISTRAR_LABEL[c.registrar]} (${c.price.toFixed(2).replace(".", ",")} €)` : "le moins cher")(chooseRegistrar(domain, data?.rows.find((x) => x.domain === domain)?.category))} dès qu’il est libre` : "Surveillance regfree annulée");
   }
 
   return (
@@ -462,7 +463,7 @@ export default function ExpiresPage() {
                     <TableHead>Courbe (24 mois)</TableHead>
                     <TableHead>Fin (Paris)</TableHead>
                     <TableHead>Plateformes — 🤖 Nicsell / Dynadot = robot ; ⏰ Catched = rappel Telegram 1 h avant ; sinon posé à la main (coche autant de plateformes que tu veux)</TableHead>
-                    <TableHead title="Si personne ne le capte et qu’il redevient libre : achat automatique chez Openprovider + message Telegram">Regfree</TableHead>
+                    <TableHead title="Si personne ne le capte et qu’il redevient libre : achat automatique (nutra Europe/US = Dynadot, betting et hors Europe = le moins cher) + message Telegram">Regfree</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -530,6 +531,9 @@ export default function ExpiresPage() {
                                 <input type="checkbox" checked={!!rf?.robot_requested} disabled={rf?.robot_status === "done"} onChange={() => toggleRegfree(r.domain, rf)} />
                                 <span>acheter si libre</span>
                               </label>
+                              {(() => { const c = chooseRegistrar(r.domain, r.category); return c
+                                ? <span className="whitespace-nowrap text-muted-foreground" title={c.rule}>{REGISTRAR_LABEL[c.registrar]} · {c.price.toFixed(2).replace(".", ",")} €</span>
+                                : <span className="text-muted-foreground">prix inconnu</span>; })()}
                               {st && <span className={st.cls}>{st.text}</span>}
                             </div>
                           );

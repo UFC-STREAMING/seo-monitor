@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { chooseRegistrar } from "@/lib/expired/registrar-prices";
 
 // Ordres du robot d'achat (Mac Mini, navigateur connecté de Dana), Bearer CRON_SECRET.
 // GET  → ordres en attente : Catched = poser le backorder, Nicsell = miser max_bid 5 min avant ends_at_ts.
@@ -16,7 +17,15 @@ export async function GET(request: NextRequest) {
     .or("robot_status.is.null,robot_status.eq.pending,robot_status.eq.done,robot_status.eq.bid")
     .order("ends_at_ts", { ascending: true, nullsFirst: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ orders: data ?? [] });
+  // Regfree : registrar d'achat imposé par la règle Leo 25/11 (nutra Europe/US = Dynadot ; betting et hors Europe = le moins cher)
+  const orders = data ?? [];
+  const regfree = [...new Set(orders.filter((o) => o.platform === "regfree").map((o) => o.domain))];
+  const cat = new Map<string, string | null>();
+  for (let i = 0; i < regfree.length; i += 500) {
+    const { data: d } = await createAdminClient().from("expired_domains").select("domain, category").in("domain", regfree.slice(i, i + 500));
+    for (const x of d ?? []) cat.set(x.domain, x.category);
+  }
+  return NextResponse.json({ orders: orders.map((o) => o.platform !== "regfree" ? o : { ...o, category: cat.get(o.domain) ?? null, registrar: chooseRegistrar(o.domain, cat.get(o.domain))?.registrar ?? null }) });
 }
 
 // « auction » = enchère DropCatch en cours (Leo 22/11) : ni gagnée ni perdue, le robot ne repose pas de backorder
